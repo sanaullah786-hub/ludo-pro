@@ -62,8 +62,11 @@ jobs:
       - name: Patch Android project (portrait, version)
         run: node scripts/patch-android.js
 
-      - name: Configure Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Configure Android SDK (preinstalled on GitHub's Ubuntu runners)
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          test -d "$ANDROID_HOME" || { echo "::error::Android SDK not found"; exit 1; }
+          echo "sdk.dir=$ANDROID_HOME" > android/local.properties
 
       - name: Install the Android platform that the project compiles against
         run: |
