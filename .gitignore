@@ -1,0 +1,16 @@
+node_modules/
+dist/
+*.apk
+*.aab
+.DS_Store
+
+# Android build output (the android/ project itself may be committed)
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/captures/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/capacitor-cordova-android-plugins/

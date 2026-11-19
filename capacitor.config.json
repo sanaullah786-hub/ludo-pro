@@ -1,0 +1,11 @@
+{
+  "appId": "com.sanaullahkhoso.ludopro",
+  "appName": "Ludo Pro",
+  "webDir": "www",
+  "backgroundColor": "#050c24",
+  "android": {
+    "allowMixedContent": false,
+    "backgroundColor": "#050c24",
+    "webContentsDebuggingEnabled": false
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "ludo-pro",
+  "version": "1.0.0",
+  "description": "Ludo Pro - classic Ludo board game for Android (HTML5 + Capacitor). Developed by Sanaullah Khoso.",
+  "author": "Sanaullah Khoso",
+  "license": "UNLICENSED",
+  "private": true,
+  "scripts": {
+    "test": "node tests/engine.test.js && node tests/app.test.js",
+    "test:e2e": "node tests/browser.test.js",
+    "build": "node scripts/build-web.js",
+    "assets": "npx capacitor-assets generate --android",
+    "android:add": "npx cap add android",
+    "android:sync": "npx cap sync android && node scripts/patch-android.js",
+    "android:debug": "npm run build && npm run android:sync && cd android && ./gradlew assembleDebug",
+    "serve": "npx --yes serve www -l 8080"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
