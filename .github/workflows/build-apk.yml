@@ -73,8 +73,11 @@ jobs:
           SDK=$(grep -oP 'compileSdkVersion\s*=\s*\K[0-9]+' android/variables.gradle || true)
           SDK=${SDK:-35}
           echo "compileSdkVersion = $SDK"
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-$SDK" "platform-tools"
+          SDKM=$(ls -d "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager 2>/dev/null | sort -V | tail -1)
+          echo "sdkmanager = $SDKM"
+          test -x "$SDKM" || { echo "::error::sdkmanager not found in $ANDROID_HOME/cmdline-tools"; exit 1; }
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-$SDK" "platform-tools"
 
       - name: Build debug APK with Gradle
         working-directory: android
