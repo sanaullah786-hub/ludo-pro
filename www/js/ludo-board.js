@@ -52,6 +52,9 @@
     [[2, 11], [4, 11], [2, 13], [4, 13]]
   ];
 
+  // Centre of each 6x6 home base (the dice sits here while it is that player's turn).
+  var BASE_CENTRES = [[3, 3], [12, 3], [12, 12], [3, 12]];
+
   // Where finished tokens rest: centre triangle of their own colour.
   var FINISH_ANCHOR = [[6.55, 7.5, 'v'], [7.5, 6.55, 'h'], [8.45, 7.5, 'v'], [7.5, 8.45, 'h']];
 
@@ -101,7 +104,7 @@
 
   var api = {
     GRID: GRID, TRACK: TRACK, HOME_LANES: HOME_LANES, BASE_SPOTS: BASE_SPOTS,
-    FINISH_ANCHOR: FINISH_ANCHOR, CELL_INFO: CELL_INFO, coordFor: coordFor
+    FINISH_ANCHOR: FINISH_ANCHOR, BASE_CENTRES: BASE_CENTRES, CELL_INFO: CELL_INFO, coordFor: coordFor
   };
 
   // =========================================================== BoardView ===
@@ -185,7 +188,10 @@
   BoardView.prototype.build = function (state) {
     var self = this;
     installGradients();
-    this.container.innerHTML = '';
+    // remove everything except elements marked data-keep (the dice that floats over the board)
+    Array.prototype.slice.call(this.container.children).forEach(function (n) {
+      if (!n.hasAttribute('data-keep')) self.container.removeChild(n);
+    });
     this.tokens = {};
     var board = el('div', 'ludo-board', this.container);
     this.board = board;
@@ -257,6 +263,7 @@
     });
     this.setStepMs(this.stepMs);
     this.layout(state);
+    this.setShields(state);
   };
 
   BoardView.prototype.setStepMs = function (ms) {
@@ -338,6 +345,26 @@
       var d = el('div', 'target', layer);
       d.style.left = pct(c.x - 0.42); d.style.top = pct(c.y - 0.42);
       d.style.width = pct(0.84); d.style.height = pct(0.84);
+    });
+  };
+
+  /** Glow the tokens a spell can be aimed at: list of {seat, token}. */
+  BoardView.prototype.setHighlights = function (list) {
+    var self = this;
+    Object.keys(this.tokens).forEach(function (k) { self.tokens[k].classList.remove('pickable'); });
+    (list || []).forEach(function (c) {
+      var t = self.tokens[c.seat + '-' + c.token];
+      if (t) t.classList.add('pickable');
+    });
+  };
+
+  /** Show the magic shield bubble on protected tokens. */
+  BoardView.prototype.setShields = function (state) {
+    var self = this;
+    var sh = state && state.magic ? state.magic.shields : null;
+    Object.keys(this.tokens).forEach(function (k) {
+      var parts = k.split('-');
+      self.tokens[k].classList.toggle('shielded', !!(sh && sh[parts[0]] && sh[parts[0]][parts[1]]));
     });
   };
 

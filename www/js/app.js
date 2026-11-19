@@ -13,7 +13,7 @@
   var COLOR_NAME = ['Red', 'Green', 'Yellow', 'Blue'];
   var CPU_NAMES = ['Bolt', 'Nova', 'Zed', 'Rex'];
   var AVATARS = ['😎', '🤠', '🦊', '🐼', '🦁', '🐯', '🐸', '🐵', '🦄', '🐲', '👑', '🚀', '⚡', '🔥', '🎲', '🏆', '🌟', '🎯'];
-  var MODE_LABEL = { cpu: 'vs Computer', local2: '2 Players', local3: '3 Players', local4: '4 Players', passplay: 'Pass & Play' };
+  var MODE_LABEL = { cpu: 'vs Computer', local2: '2 Players', local3: '3 Players', local4: '4 Players', passplay: 'Pass & Play', magic: '🪄 Magic Play' };
   var SCREENS = ['splash', 'home', 'modes', 'setup', 'game', 'result', 'settings', 'history', 'profile', 'rewards'];
 
   function $(id) { return document.getElementById(id); }
@@ -138,7 +138,7 @@
   function openSetup(mode) {
     var p = D.getProfile();
     setup = {
-      mode: mode, humanSeat: 0, opp: 1, diff: 'medium',
+      mode: mode, humanSeat: 0, opp: 1, diff: 'medium', magic: mode === 'magic',
       seats: [0, 1, 2, 3].map(function (s) { return { on: false, name: s === 0 ? p.name : 'Player ' + (s + 1) }; })
     };
     var defaults = { local2: [0, 2], local3: [0, 1, 2], local4: [0, 1, 2, 3], passplay: [0, 1, 2] }[mode] || [];
@@ -146,12 +146,13 @@
     go('setup');
   }
 
+  function isCpuMode() { return setup && (setup.mode === 'cpu' || setup.mode === 'magic'); }
   function needCount() { return { local2: 2, local3: 3, local4: 4 }[setup.mode] || 0; }
   function activeSeats() { return [0, 1, 2, 3].filter(function (s) { return setup.seats[s].on; }); }
   function oppSeats(h, n) { return [(h + 2) % 4, (h + 1) % 4, (h + 3) % 4].slice(0, n); }
 
   function setupValid() {
-    if (setup.mode === 'cpu') return true;
+    if (isCpuMode()) return true;
     var k = activeSeats().length, n = needCount();
     return n ? k === n : k >= 2;
   }
@@ -160,7 +161,7 @@
     if (!setup) { show('modes'); return; }
     var body = $('setup-body'), html = '';
     $('setup-title').textContent = MODE_LABEL[setup.mode];
-    if (setup.mode === 'cpu') {
+    if (isCpuMode()) {
       html += '<div class="card"><h3>Your colour</h3><div class="swatches">';
       for (var s = 0; s < 4; s++) html += '<button class="swatch' + (setup.humanSeat === s ? ' sel' : '') + '" data-hs="' + s + '" style="--c:' + COLOR_HEX[s] + '" aria-label="' + COLOR_NAME[s] + '"></button>';
       html += '</div></div><div class="card"><h3>Opponents</h3><div class="pick-row">';
@@ -192,6 +193,12 @@
       }
       if (setup.mode === 'passplay') html += '<p class="note" style="margin:6px 4px">A hand-over screen appears before each player\'s turn so the phone can be passed around.</p>';
     }
+    if (setup.mode === 'magic') {
+      html += '<div class="card"><h3>\uD83E\uDE84 Magic spells</h3><p class="note" style="margin:0">Every player starts with one <b>Pick Dice</b> \uD83C\uDFAF, one <b>Shield</b> \uD83D\uDEE1\uFE0F and one <b>Blast</b> \uD83D\uDCA5. Cast a spell before rolling. Bringing a token home earns another spell.</p></div>';
+    } else {
+      html += '<div class="card"><div class="row" style="padding:0;border:0"><div class="grow"><span class="setting-title">\uD83E\uDE84 Magic spells</span><br><small>Pick Dice, Shield and Blast for everyone</small></div>' +
+        '<button class="switch ' + (setup.magic ? 'on' : '') + '" data-magic="1" aria-label="Magic spells"></button></div></div>';
+    }
     body.innerHTML = html;
     $('btn-start-game').disabled = !setupValid();
   }
@@ -199,7 +206,7 @@
   function startFromSetup() {
     if (!setupValid()) return;
     var config, rules = D.getSettings().rules;
-    if (setup.mode === 'cpu') {
+    if (isCpuMode()) {
       var h = setup.humanSeat, opps = oppSeats(h, setup.opp);
       var seats = [h].concat(opps).sort();
       var types = {}, names = {}, difficulty = {};
@@ -208,11 +215,11 @@
         if (s === h) { names[s] = nm; types[s] = 'human'; }
         else { names[s] = CPU_NAMES[s]; types[s] = 'cpu'; difficulty[s] = setup.diff; }
       });
-      config = { mode: 'cpu', seats: seats, types: types, names: names, difficulty: difficulty, rules: rules, firstSeat: h };
+      config = { mode: setup.mode, seats: seats, types: types, names: names, difficulty: difficulty, rules: rules, firstSeat: h, magic: !!setup.magic };
     } else {
       var act = activeSeats(), nms = {};
       act.forEach(function (s) { nms[s] = setup.seats[s].name.trim() || 'Player ' + (s + 1); });
-      config = { mode: setup.mode === 'passplay' ? 'passplay' : setup.mode, seats: act, names: nms, rules: rules, firstSeat: act[0] };
+      config = { mode: setup.mode === 'passplay' ? 'passplay' : setup.mode, seats: act, names: nms, rules: rules, firstSeat: act[0], magic: !!setup.magic };
     }
     if (config.mode !== 'cpu' && config.mode !== 'passplay') config.mode = config.mode; // local2/3/4 keep their id
     D.updateProfile({ name: config.names[config.seats.filter(function (s) { return !config.types || config.types[s] !== 'cpu'; })[0]] });
@@ -227,7 +234,7 @@
       view: view, audio: A,
       getSettings: function () { return settings; },
       ui: {
-        onGameStart: onGameStart, onTurn: onTurn, setRollEnabled: setRollEnabled,
+        onGameStart: onGameStart, onTurn: onTurn, setRollEnabled: setRollEnabled, onTimer: onTimer,
         animateDice: animateDice, showDice: showDice, message: message, onStateChanged: onStateChanged,
         confirmHandOff: confirmHandOff, save: function (snap) { D.saveGame(snap); },
         onEvent: onEvent, onGameOver: onGameOver,
@@ -263,6 +270,9 @@
     });
     $('players-strip').innerHTML = html;
     $('btn-roll').disabled = true;
+    $('spell-bar').hidden = !s.magic;
+    pickKind = null;
+    placeDice(s.current, true);
     message('Get ready!', s.current);
     updateStrip(s);
   }
@@ -272,19 +282,122 @@
     for (var i = 0; i < chips.length; i++) {
       var seat = Number(chips[i].getAttribute('data-seat'));
       chips[i].classList.toggle('cur', seat === s.current && s.status !== 'finished');
-      chips[i].querySelector('em').textContent = '🏠 ' + E.finishedCount(s, seat) + '/4';
+      var extra = '';
+      if (s.rules.killToEnterHome) extra += (s.kills[seat] > 0 ? ' 🔓' : ' 🔒');
+      if (s.magic) { var ch = s.magic.charges[seat]; extra += ' ✨' + (ch.dice + ch.shield + ch.blast); }
+      chips[i].querySelector('em').textContent = '🏠 ' + E.finishedCount(s, seat) + '/4' + extra;
     }
+    updateSpells(s);
     $('game-turn').textContent = 'Turn ' + s.turn;
   }
 
   function onTurn(info) {
     $('dice').style.setProperty('--dc', COLOR_HEX[info.seat]);
     $('btn-roll').disabled = true;
+    if (pickKind) { pickKind = null; }
+    placeDice(info.seat, false);
     updateStrip(info.state);
   }
   function onStateChanged(s) { updateStrip(s); }
-  function setRollEnabled(on) { $('btn-roll').disabled = !on; }
-  function showDice(v) { $('dice').setAttribute('data-v', String(v)); }
+  function setRollEnabled(on) {
+    $('btn-roll').disabled = !on;
+    $('dice-spot').classList.toggle('ready', !!on);
+    if (!on && pickKind) { pickKind = null; }
+    if (ctrl && ctrl.state) updateSpells(ctrl.state);
+  }
+
+  // ---- the 3D dice lives over the board and sits on the current player's home
+  var diceAngle = { x: 0, y: 0 };
+  var DICE_FACE = { 1: [0, 0], 2: [90, 0], 3: [0, -90], 4: [0, 90], 5: [-90, 0], 6: [0, 180] };
+  function sizeDice() {
+    var b = $('board'), w = b.clientWidth;
+    if (w) b.style.setProperty('--half', (w * 0.047).toFixed(2) + 'px');
+  }
+  function placeDice(seat, instant) {
+    sizeDice();
+    var h = $('dice-spot'), c = B.BASE_CENTRES[seat];
+    if (instant) h.classList.add('no-move');
+    h.style.left = (c[0] / 15 * 100) + '%';
+    h.style.top = (c[1] / 15 * 100) + '%';
+    if (instant) { void h.offsetWidth; h.classList.remove('no-move'); }
+  }
+  function setDiceFace(v, spins) {
+    var d = $('dice'), f = DICE_FACE[v] || DICE_FACE[1];
+    var x = f[0], y = f[1];
+    if (spins) {
+      x += 360 * (Math.ceil((diceAngle.x + 360 * spins - f[0]) / 360));
+      y += 360 * (Math.ceil((diceAngle.y + 360 * (spins + 1) - f[1]) / 360));
+    } else {
+      x += 360 * Math.round((diceAngle.x - f[0]) / 360);
+      y += 360 * Math.round((diceAngle.y - f[1]) / 360);
+    }
+    diceAngle = { x: x, y: y };
+    d.style.transform = 'rotateX(' + x + 'deg) rotateY(' + y + 'deg)';
+    d.setAttribute('data-v', String(v));
+  }
+  function showDice(v) {
+    var d = $('dice');
+    d.classList.add('instant');
+    setDiceFace(v, 0);
+    void d.offsetWidth;
+    d.classList.remove('instant');
+  }
+
+  function onTimer(t) {
+    var el = $('turn-timer');
+    if (!t) { el.hidden = true; return; }
+    el.hidden = false;
+    var left = Math.ceil(t.left - 0.0001);
+    el.querySelector('b').textContent = String(Math.max(0, left));
+    el.style.setProperty('--p', String(Math.max(0, t.left / t.total) * 360) + 'deg');
+    el.classList.toggle('warn', t.left <= 3);
+  }
+
+  // ---- magic spells
+  var pickKind = null;
+  function updateSpells(s) {
+    var bar = $('spell-bar');
+    if (!s || !s.magic) { bar.hidden = true; return; }
+    bar.hidden = false;
+    // show the charges of the human who is playing (or the owner while the computer plays)
+    var seat = s.players[s.current].type === 'human' ? s.current : (ctrl.meta ? ctrl.meta.ownerSeat : s.current);
+    var ch = s.magic.charges[seat];
+    ['dice', 'shield', 'blast'].forEach(function (k) {
+      var b = bar.querySelector('[data-spell="' + k + '"]');
+      b.querySelector('em').textContent = String(ch[k]);
+      b.disabled = !(ctrl && ctrl.canCast(k));
+      b.classList.toggle('on', ctrl && ctrl.pickMode() === k);
+    });
+  }
+
+  function openDicePick() {
+    ctrl.pause();
+    var html = '<h3>🎯 Pick Dice</h3><p>Choose the number you want to roll.</p><div class="dice-pick">';
+    for (var i = 1; i <= 6; i++) html += '<button class="btn btn-gold" data-n="' + i + '">' + i + '</button>';
+    html += '</div><button class="btn btn-ghost" data-n="0">Cancel</button>';
+    var m = openModal(html);
+    m.onclick = function (e) {
+      var b = e.target.closest('[data-n]');
+      if (!b) return;
+      var n = Number(b.getAttribute('data-n'));
+      closeModal();
+      ctrl.unpause();
+      if (n) ctrl.requestMagicDice(n);
+    };
+  }
+
+  function onSpellButton(kind) {
+    if (!ctrl) return;
+    if (kind === 'dice') { if (ctrl.canCast('dice')) openDicePick(); return; }
+    if (ctrl.pickMode() === kind) { ctrl.cancelPick(); message('Spell cancelled', ctrl.state.current); updateSpells(ctrl.state); return; }
+    ctrl.cancelPick();
+    if (ctrl.beginPick(kind)) {
+      message(kind === 'shield' ? '🛡️ Tap one of your tokens to shield it' : '💥 Tap an opponent token to blast it', ctrl.state.current);
+      updateSpells(ctrl.state);
+    } else {
+      toast(kind === 'shield' ? 'No token on the track to shield' : 'No unprotected opponent token to blast', 1500);
+    }
+  }
   function message(text, seat) {
     var el = $('status-line');
     el.textContent = text;
@@ -293,17 +406,16 @@
 
   function animateDice(seat, value) {
     return new Promise(function (resolve) {
-      var d = $('dice'), n = 0;
-      d.classList.remove('six');
-      d.classList.add('rolling');
-      var iv = setInterval(function () { d.setAttribute('data-v', String(1 + Math.floor(Math.random() * 6))); }, 75);
+      var h = $('dice-spot');
+      h.classList.remove('six', 'hop');
+      void h.offsetWidth;
+      h.classList.add('hop');
+      setDiceFace(value, 2);          // smooth multi-turn tumble that lands on the rolled face
       setTimeout(function () {
-        clearInterval(iv);
-        d.classList.remove('rolling');
-        d.setAttribute('data-v', String(value));
-        if (value === 6) { void d.offsetWidth; d.classList.add('six'); }
+        h.classList.remove('hop');
+        if (value === 6) { void h.offsetWidth; h.classList.add('six'); }
         resolve();
-      }, 640);
+      }, 820);
     });
   }
 
@@ -327,6 +439,13 @@
       if (evt.seat === owner) Eco.track('capture', evt.count);
     } else if (evt.type === 'six') {
       if (evt.seat === owner) Eco.track('six', 1);
+    } else if (evt.type === 'homeUnlocked') {
+      toast(evt.human ? '🔓 Home lane opened - your tokens can go home!' : '🔓 Home lane opened', 1800);
+    } else if (evt.type === 'timeout') {
+      toast('⏱ Time up!', 1200);
+    } else if (evt.type === 'magic') {
+      if (evt.kind === 'earned') toast('✨ New spell earned', 1400);
+      else toast('🪄 ' + ({ dice: 'Pick Dice', shield: 'Shield', blast: 'Blast' })[evt.kind], 1100);
     } else if (evt.type === 'tokenHome') {
       toast('🏠 Token reached home!', 1400);
       if (evt.seat === owner) Eco.track('token_home', 1);
@@ -377,7 +496,7 @@
     var won = sum.winnerSeat === owner;
     var st = sum.stats;
     var cpuSeats = sum.players.filter(function (p) { return p.type === 'cpu'; });
-    var vsCpu = sum.mode === 'cpu';
+    var vsCpu = sum.mode === 'cpu' || sum.mode === 'magic';
     var diff = cpuSeats.length ? cpuSeats[0].difficulty : null;
     D.recordGame({ won: won, captures: st.captures[owner], sixes: st.sixes[owner], tokensHome: st.homeTokens[owner] });
     var reward = Eco.awardGame({ won: won, captures: st.captures[owner], vsCpu: vsCpu, difficulty: diff });
@@ -450,6 +569,9 @@
       sw('autoMove', s.autoMove, 'Auto-move', 'Play automatically when only one move is possible') +
       '<div class="row"><div class="grow"><span class="setting-title">Game speed</span></div><div class="pick-row" style="flex:none">' +
       ['normal', 'fast'].map(function (v) { return '<button class="pick' + (s.speed === v ? ' sel' : '') + '" data-speed="' + v + '">' + v[0].toUpperCase() + v.slice(1) + '</button>'; }).join('') +
+      '</div></div>' +
+      '<div class="row"><div class="grow"><span class="setting-title">Turn timer</span><br><small>Seconds to roll or move before the turn passes</small></div><div class="pick-row" style="flex:none">' +
+      [[0, 'Off'], [10, '10s'], [15, '15s'], [20, '20s']].map(function (v) { return '<button class="pick' + (s.turnTimer === v[0] ? ' sel' : '') + '" data-timer="' + v[0] + '">' + v[1] + '</button>'; }).join('') +
       '</div></div></div>' +
       '<div class="card"><h3>Classic rules <small style="color:var(--muted)">(apply to new games)</small></h3>' +
       sw('r.sixToStart', r.sixToStart, 'Six to leave base') +
@@ -459,6 +581,7 @@
       sw('r.threeSixesForfeit', r.threeSixesForfeit, 'Three sixes lose the turn') +
       sw('r.safeSquares', r.safeSquares, 'Safe squares', 'Star and start cells cannot be captured on') +
       sw('r.exactFinish', r.exactFinish, 'Exact roll to finish') +
+      sw('r.killToEnterHome', r.killToEnterHome, 'Capture to open home', 'Tokens keep circling the board until you have captured an opponent') +
       '<div class="row"><button class="btn btn-ghost mini-btn" id="rules-default">Restore classic defaults</button></div></div>' +
       '<div class="card"><h3>Data</h3><button class="btn btn-red mini-btn" id="reset-all">Reset all progress</button>' +
       '<p class="note" style="margin-top:8px">Deletes coins, statistics, history and saved game from this device.</p></div>' +
@@ -536,9 +659,11 @@
 
   // ------------------------------------------------------------ event wiring
   function wire() {
+    window.addEventListener('resize', sizeDice);
+    if (window.ResizeObserver) new ResizeObserver(sizeDice).observe($('board'));
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (t.closest('button, .pick, .switch, .swatch, .mode-card, .tile') && !t.closest('#btn-roll') && !t.closest('.token')) A.play('click');
+      if (t.closest('button, .pick, .switch, .swatch, .mode-card, .tile') && !t.closest('#btn-roll') && !t.closest('#dice-spot') && !t.closest('.token')) A.play('click');
     }, true);
 
     document.addEventListener('click', function (e) {
@@ -561,7 +686,11 @@
       $('btn-snd').textContent = settings.sound ? '🔊' : '🔇';
     };
     $('btn-roll').onclick = function () { if (ctrl) ctrl.requestRoll(); };
-    $('dice').onclick = function () { if (ctrl) ctrl.requestRoll(); };
+    $('dice-spot').onclick = function () { if (ctrl) ctrl.requestRoll(); };
+    $('spell-bar').addEventListener('click', function (e) {
+      var b = e.target.closest('[data-spell]');
+      if (b && !b.disabled) onSpellButton(b.getAttribute('data-spell'));
+    });
     $('res-again').onclick = function () {
       if (!ctrl || !ctrl.config) { goRoot('home'); return; }
       stack = ['home'];
@@ -583,6 +712,7 @@
       if ((t = e.target.closest('[data-hs]'))) { setup.humanSeat = Number(t.getAttribute('data-hs')); renderSetup(); }
       else if ((t = e.target.closest('[data-opp]'))) { setup.opp = Number(t.getAttribute('data-opp')); renderSetup(); }
       else if ((t = e.target.closest('[data-diff]'))) { setup.diff = t.getAttribute('data-diff'); renderSetup(); }
+      else if (e.target.closest('[data-magic]')) { setup.magic = !setup.magic; renderSetup(); }
       else if ((t = e.target.closest('[data-tog]'))) {
         var s = Number(t.getAttribute('data-tog'));
         setup.seats[s].on = !setup.seats[s].on;
@@ -610,6 +740,7 @@
         renderSettings();
         return;
       }
+      if ((t = e.target.closest('[data-timer]'))) { applySetting({ turnTimer: Number(t.getAttribute('data-timer')) }); renderSettings(); return; }
       if ((t = e.target.closest('[data-speed]'))) { applySetting({ speed: t.getAttribute('data-speed') }); renderSettings(); return; }
       if (e.target.id === 'rules-default') { applySetting({ rules: D.DEFAULT_SETTINGS.rules }); renderSettings(); toast('Classic rules restored'); return; }
       if (e.target.id === 'reset-all') {

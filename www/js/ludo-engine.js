@@ -46,8 +46,11 @@
     extraTurnOnFinish: true,   // bringing a token home gives another roll
     threeSixesForfeit: true,   // three sixes in a row forfeit the turn
     safeSquares: true,         // star and start cells protect tokens
-    exactFinish: true          // the exact number is needed to finish
+    exactFinish: true,         // the exact number is needed to finish
+    killToEnterHome: false     // home lane stays closed until the owner has captured an opponent
   };
+
+  var SPELLS = ['dice', 'shield', 'blast'];
 
   // ---------------------------------------------------------------- helpers
 
@@ -155,6 +158,8 @@
       pendingExtra: false,
       pendingWin: false,
       lastMove: null,
+      kills: [0, 0, 0, 0],
+      magic: options.magic ? makeMagic(seats) : null,
       stats: {
         captures: [0, 0, 0, 0],
         sixes: [0, 0, 0, 0],
@@ -163,6 +168,25 @@
         homeTokens: [0, 0, 0, 0]
       }
     };
+  }
+
+  function makeMagic(seats) {
+    var charges = [], shields = [];
+    for (var s = 0; s < 4; s++) {
+      var on = seats.indexOf(s) !== -1;
+      charges.push({ dice: on ? 1 : 0, shield: on ? 1 : 0, blast: on ? 1 : 0 });
+      shields.push([false, false, false, false]);
+    }
+    return { charges: charges, shields: shields };
+  }
+
+  function isShielded(state, seat, token) {
+    return !!(state.magic && state.magic.shields && state.magic.shields[seat] && state.magic.shields[seat][token]);
+  }
+
+  /** True while this seat may not enter its home lane (kill rule on and no capture yet). */
+  function isGateLocked(state, seat) {
+    return !!state.rules.killToEnterHome && !(state.kills && state.kills[seat] > 0);
   }
 
   function nextSeat(state) {
@@ -175,6 +199,7 @@
     state.validMoves = [];
     state.pendingExtra = false;
     state.current = nextSeat(state);
+    if (state.magic) state.magic.shields[state.current] = [false, false, false, false];
     state.status = 'waiting_roll';
     state.turn += 1;
   }
@@ -190,6 +215,9 @@
       return 0;
     }
     var target = pos + value;
+    // Gate closed: instead of turning into the home lane the token keeps
+    // circling the board (second lap) until its owner has made a capture.
+    if (target > LAST_TRACK_REL && isOnTrack(pos) && isGateLocked(state, seat)) return target - (LAST_TRACK_REL + 1);
     if (target > FINISH) return state.rules.exactFinish ? null : FINISH;
     return target;
   }
@@ -233,7 +261,7 @@
       if (s === seat) return;
       for (var t = 0; t < TOKENS_PER_PLAYER; t++) {
         var p = state.tokens[s][t];
-        if (isOnTrack(p) && trackCell(s, p) === cell) {
+        if (isOnTrack(p) && trackCell(s, p) === cell && !isShielded(state, s, t)) {
           captured.push({ seat: s, token: t, from: p, cell: cell });
         }
       }
@@ -249,8 +277,12 @@
     var to = targetPosition(state, seat, tokenIdx, value);
     if (to === null) return null;
     var path = [];
+    var wraps = from >= 0 && to >= 0 && to <= LAST_TRACK_REL && to < from;
     if (from === BASE) path.push(0);
-    else for (var p = from + 1; p <= to; p++) path.push(p);
+    else if (wraps) {
+      for (var p1 = from + 1; p1 <= LAST_TRACK_REL; p1++) path.push(p1);
+      for (var p2 = 0; p2 <= to; p2++) path.push(p2);
+    } else for (var p = from + 1; p <= to; p++) path.push(p);
     var captures = capturesAt(state, seat, to);
     var landsSafe = isProtectedPos(seat, to, state.rules);
     return {
@@ -262,6 +294,7 @@
       path: path,
       captures: captures,
       entersFromBase: from === BASE,
+      wraps: wraps,
       entersHomeLane: !isInHomeLane(from) && isInHomeLane(to),
       finishes: to === FINISH,
       landsSafe: landsSafe,
@@ -362,7 +395,11 @@
     preview.captures.forEach(function (c) { state.tokens[c.seat][c.token] = BASE; });
     state.stats.captures[seat] += preview.captures.length;
     state.stats.moves[seat] += 1;
-    if (preview.finishes) state.stats.homeTokens[seat] += 1;
+    var hadKill = state.kills[seat] > 0;
+    state.kills[seat] += preview.captures.length;
+    var unlockedHome = !hadKill && state.kills[seat] > 0 && !!state.rules.killToEnterHome;
+    var earned = null;
+    if (preview.finishes) { state.stats.homeTokens[seat] += 1; earned = earnCharge(state, seat); }
 
     var extra =
       (state.dice === 6 && state.rules.extraTurnOnSix) ||
@@ -383,6 +420,8 @@
 
     var result = clone(preview);
     result.ok = true;
+    result.unlockedHome = unlockedHome;
+    result.earnedSpell = earned;
     result.extraTurn = !!extra && !won;
     result.won = won;
     return result;
@@ -406,6 +445,97 @@
     }
     passTurn(state);
     return { ok: true, finished: false, extraTurn: false, nextSeat: state.current };
+  }
+
+  // ------------------------------------------------------ timeout / magic
+
+  /** The player ran out of time to roll: the turn passes to the next player. */
+  function skipTurn(state) {
+    if (state.status === 'finished') return fail('game_finished');
+    if (state.rolling) return fail('dice_rolling');
+    if (state.status !== 'waiting_roll') return fail('not_waiting_roll');
+    var seat = state.current;
+    passTurn(state);
+    return { ok: true, skipped: seat, nextSeat: state.current };
+  }
+
+  /** Finishing a token earns one spell charge (deterministic from the game state). */
+  function earnCharge(state, seat) {
+    if (!state.magic) return null;
+    var kind = SPELLS[(state.turn + seat + state.stats.homeTokens[seat]) % SPELLS.length];
+    state.magic.charges[seat][kind] += 1;
+    return kind;
+  }
+
+  /** Valid targets for a spell: shield -> own tokens, blast -> opponent tokens. */
+  function magicTargets(state, kind) {
+    var out = [];
+    if (!state.magic) return out;
+    var seat = state.current, t;
+    if (kind === 'shield') {
+      for (t = 0; t < TOKENS_PER_PLAYER; t++) {
+        if (isOnTrack(state.tokens[seat][t]) && !isShielded(state, seat, t)) out.push({ seat: seat, token: t });
+      }
+    } else if (kind === 'blast') {
+      state.seats.forEach(function (s) {
+        if (s === seat) return;
+        for (var k = 0; k < TOKENS_PER_PLAYER; k++) {
+          var p = state.tokens[s][k];
+          if (isOnTrack(p) && !isSafeCell(trackCell(s, p), state.rules) && !isShielded(state, s, k)) {
+            out.push({ seat: s, token: k, progress: p });
+          }
+        }
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Cast a spell for the current player. Only allowed before rolling.
+   *   dice   {value}          choose the dice number for this turn (acts as the roll)
+   *   shield {token}          own token cannot be captured until your next turn
+   *   blast  {seat, token}    send an unprotected opponent token back to its base
+   */
+  function useMagic(state, kind, args) {
+    args = args || {};
+    if (!state.magic) return fail('no_magic');
+    if (SPELLS.indexOf(kind) === -1) return fail('unknown_spell');
+    if (state.status === 'finished') return fail('game_finished');
+    if (state.rolling) return fail('dice_rolling');
+    if (state.status !== 'waiting_roll') return fail('not_waiting_roll');
+    var seat = state.current;
+    var ch = state.magic.charges[seat];
+    if (!(ch[kind] > 0)) return fail('no_charge');
+
+    if (kind === 'dice') {
+      var v = args.value;
+      if (!(v >= 1 && v <= 6) || v !== Math.floor(v)) return fail('invalid_dice_value');
+      ch.dice -= 1;
+      var r = applyRoll(state, v);
+      r.magic = 'dice';
+      return r;
+    }
+
+    var target = magicTargets(state, kind).filter(function (c) {
+      return kind === 'shield' ? c.token === args.token : (c.seat === args.seat && c.token === args.token);
+    })[0];
+    if (!target) return fail('invalid_target');
+    ch[kind] -= 1;
+
+    if (kind === 'shield') {
+      state.magic.shields[seat][target.token] = true;
+      return { ok: true, magic: 'shield', seat: seat, token: target.token };
+    }
+    var from = state.tokens[target.seat][target.token];
+    state.tokens[target.seat][target.token] = BASE;
+    state.stats.captures[seat] += 1;
+    var hadKill = state.kills[seat] > 0;
+    state.kills[seat] += 1;
+    return {
+      ok: true, magic: 'blast', seat: seat,
+      target: { seat: target.seat, token: target.token, from: from },
+      unlockedHome: !hadKill && !!state.rules.killToEnterHome
+    };
   }
 
   // ---------------------------------------------------------------- results
@@ -477,6 +607,10 @@
     try { s = typeof json === 'string' ? JSON.parse(json) : json; } catch (e) { return null; }
     if (!isValidState(s)) return null;
     s.rolling = false;
+    if (!Array.isArray(s.kills) || s.kills.length !== 4) s.kills = [0, 0, 0, 0];
+    if (s.magic === undefined || s.magic === false) s.magic = null;
+    if (s.magic && (!Array.isArray(s.magic.charges) || !Array.isArray(s.magic.shields))) s.magic = null;
+    s.rules.killToEnterHome = s.rules.killToEnterHome === true;
     if (s.status === 'animating') {
       s.status = 'waiting_roll';
       s.pendingWin = false;
@@ -508,6 +642,8 @@
     totalProgress: totalProgress, finishedCount: finishedCount,
     finalRankings: finalRankings, isGameOver: isGameOver,
     simulateMove: simulateMove,
+    SPELLS: SPELLS, skipTurn: skipTurn, useMagic: useMagic, magicTargets: magicTargets,
+    isShielded: isShielded, isGateLocked: isGateLocked,
     serialize: serialize, deserialize: deserialize, isValidState: isValidState,
     clone: clone
   };

@@ -10,9 +10,9 @@
   var BASE = 'assets/sounds/';
   var FILES = {
     dice: 'dice.mp3', move: 'move.mp3', capture: 'capture.mp3', home: 'home.mp3',
-    win: 'win.mp3', click: 'click.mp3', coin: 'coin.mp3'
+    win: 'win.mp3', click: 'click.mp3', coin: 'coin.mp3', magic: 'magic.mp3'
   };
-  var VOLUME = { dice: 0.9, move: 0.7, capture: 0.9, home: 0.9, win: 1, click: 0.5, coin: 0.8 };
+  var VOLUME = { dice: 0.9, move: 0.7, capture: 0.9, home: 0.9, win: 1, click: 0.5, coin: 0.8, magic: 0.8 };
   var POOL_SIZE = 3;
 
   var pools = {};

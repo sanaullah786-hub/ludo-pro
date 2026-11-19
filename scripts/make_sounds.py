@@ -129,6 +129,13 @@ def main():
     write_mp3('coin.mp3', normalise(mix(0.55, [(0, tone(1318.5, 0.3, 'soft', 0.002, 0.15, 9, 0.7)),
                                                (0.09, tone(1760, 0.4, 'soft', 0.002, 0.25, 7, 0.7))])))
 
+    # magic: rising sparkle arpeggio with a shimmer tail
+    write_mp3('magic.mp3', normalise(mix(0.9, [(0.00, tone(659.3, 0.35, 'soft', 0.003, 0.2, 6, 0.6)),
+                                               (0.07, tone(880.0, 0.35, 'soft', 0.003, 0.2, 6, 0.6)),
+                                               (0.14, tone(1174.7, 0.35, 'soft', 0.003, 0.2, 6, 0.6)),
+                                               (0.21, tone(1568.0, 0.5, 'soft', 0.003, 0.3, 5, 0.6)),
+                                               (0.0, sweep(500, 2400, 0.5, 4.0, 0.25))])))
+
     # background music: 16 bars, C - Am - F - G, ~108 bpm, designed to loop
     bpm = 108
     beat = 60 / bpm

@@ -20,7 +20,7 @@ const REQUIRED = [
   'assets/images/logo.png', 'assets/images/splash-screen.png', 'assets/images/bg-main.jpg',
   'assets/icons/app-icon.png', 'assets/icons/icon-192.png', 'assets/icons/coin.png',
   'assets/sounds/dice.mp3', 'assets/sounds/move.mp3', 'assets/sounds/capture.mp3', 'assets/sounds/home.mp3',
-  'assets/sounds/win.mp3', 'assets/sounds/click.mp3', 'assets/sounds/coin.mp3', 'assets/sounds/music.mp3'
+  'assets/sounds/win.mp3', 'assets/sounds/click.mp3', 'assets/sounds/coin.mp3', 'assets/sounds/magic.mp3', 'assets/sounds/music.mp3'
 ];
 
 let problems = 0;

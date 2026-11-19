@@ -35,6 +35,7 @@
     var p = E.previewMove(state, idx);
     var score = 0;
     score += p.captures.length * 1000;
+    if (p.captures.length && E.isGateLocked(state, state.current)) score += 400; // a kill opens the home lane
     if (p.finishes) score += 600;
     if (p.entersHomeLane) score += 150;
     if (p.entersFromBase) score += 300;
@@ -62,6 +63,7 @@
     p.captures.forEach(function (c) {
       score += 600 + E.progressOf(c.from) * 9;
     });
+    if (p.captures.length && E.isGateLocked(state, seat)) score += 500; // first kill opens the home lane
 
     // Getting tokens out of the base.
     if (p.entersFromBase) {
@@ -141,5 +143,79 @@
     return best;
   }
 
-  return { chooseMove: chooseMove, scoreMedium: scoreMedium, scoreHard: scoreHard };
+  // ------------------------------------------------------------------ magic
+
+  var MAGIC_CHANCE = { easy: 0.3, medium: 0.65, hard: 0.95 };
+
+  function tokensOnTrack(state, seat) {
+    return state.tokens[seat].filter(function (p) { return E.isOnTrack(p); }).length;
+  }
+
+  /**
+   * Decide whether the computer casts a spell before rolling.
+   * Returns null or {kind, args} that E.useMagic accepts for the current player.
+   */
+  function chooseMagic(state, level, rng) {
+    if (!state.magic || state.status !== 'waiting_roll') return null;
+    var rnd = typeof rng === 'function' ? rng : Math.random;
+    var seat = state.current, ch = state.magic.charges[seat];
+    if (!(ch.dice > 0 || ch.shield > 0 || ch.blast > 0)) return null;
+    if (rnd() > (MAGIC_CHANCE[level] || MAGIC_CHANCE.medium)) return null;
+
+    var targets, best, i;
+
+    // Blast: remove the most advanced unprotected opponent token.
+    if (ch.blast > 0) {
+      targets = E.magicTargets(state, 'blast');
+      if (targets.length) {
+        if (level === 'easy') {
+          best = targets[Math.floor(rnd() * targets.length) % targets.length];
+        } else {
+          best = targets.reduce(function (a, b) { return b.progress > a.progress ? b : a; });
+          if (best.progress < (level === 'hard' ? 18 : 28) && !E.isGateLocked(state, seat)) best = null;
+        }
+        if (best) return { kind: 'blast', args: { seat: best.seat, token: best.token } };
+      }
+    }
+
+    // Shield: protect the most advanced token that an opponent could hit next turn.
+    if (ch.shield > 0) {
+      targets = E.magicTargets(state, 'shield');
+      var threatened = targets.filter(function (c) {
+        var pos = state.tokens[seat][c.token];
+        return E.threatLevel(state, seat, E.trackCell(seat, pos)) > 0 && pos >= 12;
+      });
+      if (level === 'easy' && targets.length) {
+        return { kind: 'shield', args: { token: targets[Math.floor(rnd() * targets.length) % targets.length].token } };
+      }
+      if (threatened.length) {
+        best = threatened.reduce(function (a, b) { return state.tokens[seat][b.token] > state.tokens[seat][a.token] ? b : a; });
+        return { kind: 'shield', args: { token: best.token } };
+      }
+    }
+
+    // Pick dice: a six when nothing is on the board, or a winning / capturing number.
+    if (ch.dice > 0) {
+      if (level === 'easy') return { kind: 'dice', args: { value: 1 + Math.floor(rnd() * 6) % 6 } };
+      var inBase = state.tokens[seat].some(function (p) { return p === E.BASE; });
+      if (inBase && tokensOnTrack(state, seat) === 0 &&
+          !state.tokens[seat].some(function (p) { return E.isInHomeLane(p); })) {
+        return { kind: 'dice', args: { value: 6 } };
+      }
+      if (level === 'hard') {
+        var bestV = 0, bestScore = 0;
+        for (var v = 1; v <= 6; v++) {
+          E.getValidMoves(state, seat, v).forEach(function (idx) {
+            var pv = E.previewMove(state, idx, v, seat);
+            var sc = pv.finishes ? 3 : (pv.captures.length ? 2 : 0);
+            if (sc > bestScore) { bestScore = sc; bestV = v; }
+          });
+        }
+        if (bestV) return { kind: 'dice', args: { value: bestV } };
+      }
+    }
+    return null;
+  }
+
+  return { chooseMove: chooseMove, chooseMagic: chooseMagic, scoreMedium: scoreMedium, scoreHard: scoreHard };
 });

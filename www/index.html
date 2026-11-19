@@ -34,7 +34,7 @@
 
     <div class="home-main">
       <img class="home-logo" src="assets/images/logo.png" alt="Ludo Pro logo">
-      <button class="btn btn-gold btn-xl" id="btn-play">▶ PLAY</button>
+      <button class="btn btn-green btn-play" id="btn-play">▶ PLAY</button>
       <button class="btn btn-blue btn-lg" id="btn-continue" hidden>⟳ Continue game <small id="continue-info"></small></button>
       <div class="home-grid">
         <button class="tile" data-go="rewards"><span>🎁</span>Rewards<em class="dot" id="tile-dot" hidden></em></button>
@@ -50,6 +50,7 @@
   <section id="screen-modes" class="screen">
     <header class="page-head"><button class="back" data-back aria-label="Back">‹</button><h2>Select Game Mode</h2><span></span></header>
     <div class="scroll">
+      <button class="mode-card magic" data-mode="magic"><span class="mc-ic">🪄</span><span class="mc-tx"><b>Magic Play</b><small>Pick Dice, Shield and Blast spells vs Computer</small></span><i>›</i></button>
       <button class="mode-card" data-mode="cpu"><span class="mc-ic">🤖</span><span class="mc-tx"><b>Play vs Computer</b><small>Easy, Medium or Hard opponents</small></span><i>›</i></button>
       <button class="mode-card" data-mode="local2"><span class="mc-ic">👥</span><span class="mc-tx"><b>Two Players Offline</b><small>Two friends, one device</small></span><i>›</i></button>
       <button class="mode-card" data-mode="local3"><span class="mc-ic">👨‍👩‍👦</span><span class="mc-tx"><b>Three Players Offline</b><small>Three friends, one device</small></span><i>›</i></button>
@@ -73,15 +74,27 @@
       <button class="icon-btn" id="btn-snd" aria-label="Sound">🔊</button>
     </header>
     <div class="players-strip" id="players-strip"></div>
-    <div class="board-wrap"><div id="board"></div></div>
-    <div class="status-line" id="status-line">Welcome to Ludo Pro</div>
-    <div class="dice-bar">
-      <div class="dice-spot" id="dice-spot">
-        <div class="dice" id="dice" data-v="1" role="button" aria-label="Dice">
-          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+    <div class="board-wrap"><div id="board">
+      <div class="dice-spot" id="dice-spot" data-keep="1" role="button" aria-label="Tap the dice to roll">
+        <div class="dice" id="dice" data-v="1">
+          <div class="face f1"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="face f2"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="face f3"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="face f4"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="face f5"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="face f6"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
         </div>
+        <div class="turn-timer" id="turn-timer" hidden><b>10</b></div>
       </div>
-      <button class="btn btn-gold roll-btn" id="btn-roll" disabled>ROLL</button>
+    </div></div>
+    <div class="status-line" id="status-line">Welcome to Ludo Pro</div>
+    <div class="spell-bar" id="spell-bar" hidden>
+      <button class="spell" data-spell="dice" disabled><span>🎯</span>Pick Dice<em>0</em></button>
+      <button class="spell" data-spell="shield" disabled><span>🛡️</span>Shield<em>0</em></button>
+      <button class="spell" data-spell="blast" disabled><span>💥</span>Blast<em>0</em></button>
+    </div>
+    <div class="dice-bar">
+      <button class="btn btn-green roll-btn" id="btn-roll" disabled>🎲 ROLL</button>
     </div>
   </section>
 

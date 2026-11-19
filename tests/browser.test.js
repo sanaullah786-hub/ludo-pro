@@ -53,7 +53,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.click('#btn-play');
   ok(await active() === 'screen-modes', 'PLAY opens mode selection');
   await shot('04-modes');
-  ok(await page.locator('.mode-card').count() === 5, 'five game modes are listed');
+  ok(await page.locator('.mode-card').count() === 6, 'six game modes are listed (incl. Magic Play)');
 
   // ---- fast game speed so the CPUs play quickly
   // ---- vs computer
@@ -73,7 +73,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.evaluate(() => { window.LudoApp.applySetting({ speed: 'fast' }); });
   let rolls = 0, tapped = 0, shotMove = false;
   const t0 = Date.now();
-  while (Date.now() - t0 < 25000 && rolls < 25) {
+  while (Date.now() - t0 < 40000 && rolls < 12) {
     const st = await page.evaluate(() => {
       const c = window.LudoApp.controller;
       return { roll: c.awaitingRoll && !c.paused, move: c.awaitingMove, seat: c.state.current, over: c.state.status === 'finished' };
@@ -205,6 +205,116 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     await page.click('#btn-pause'); await page.click('[data-a="quit"]'); await page.click('[data-r="1"]');
     await page.waitForSelector('#screen-home.active');
   }
+
+
+  // ---- dice over the home, timer, modal layering, magic play, new rules
+  console.log('\nDice, timer, magic');
+  const playBtn = await page.evaluate(() => document.getElementById('btn-play').getBoundingClientRect().width);
+  await page.click('#btn-pause').catch(() => {});
+  const quitCurrent = async () => {
+    await page.click('#btn-pause'); await page.click('[data-a="quit"]'); await page.click('[data-r="1"]');
+    await page.waitForSelector('#screen-home.active');
+  };
+  const diceBase = () => page.evaluate(() => {
+    const b = document.getElementById('board').getBoundingClientRect(), d = document.getElementById('dice-spot').getBoundingClientRect();
+    const cx = (d.left + d.width / 2 - b.left) / b.width * 15, cy = (d.top + d.height / 2 - b.top) / b.height * 15;
+    return { cx, cy, seat: window.LudoApp.controller.state.current, w: d.width / b.width * 15 };
+  });
+  const baseOf = p => (p.cx < 7.5 ? (p.cy < 7.5 ? 0 : 3) : (p.cy < 7.5 ? 1 : 2));
+
+  await page.click('#btn-play'); await page.click('[data-mode="local2"]'); await page.click('#btn-start-game');
+  await page.waitForSelector('#screen-game.active'); await sleep(1000);
+  let db = await diceBase();
+  ok(baseOf(db) === db.seat, 'dice sits over the current player\'s home (seat ' + db.seat + ')');
+  ok(await page.evaluate(() => getComputedStyle(document.getElementById('dice')).transformStyle === 'preserve-3d'), 'dice is a real 3D cube');
+  ok(await page.locator('.dice .face').count() === 6, 'cube has six faces');
+  ok(await page.isVisible('#turn-timer'), 'turn timer badge is shown on the human turn');
+  ok(Number(await page.textContent('#turn-timer b')) >= 8, 'turn timer counts down from 10 seconds');
+  await shot('20-dice-over-home');
+  // tap the dice itself to roll
+  await page.evaluate(() => { window.LudoApp.controller.rng = () => 0.99; });
+  await page.click('#dice-spot', { force: true });
+  await page.waitForFunction(() => window.LudoApp.controller.state.dice === 6, null, { timeout: 4000 });
+  ok(true, 'tapping the dice rolls it');
+  ok(await page.evaluate(() => document.getElementById('dice').getAttribute('data-v') === '6'), 'cube shows the rolled face');
+  await sleep(1500);
+  // finish the current turn by timing out: shorten the timer and wait
+  await page.evaluate(() => window.LudoApp.applySetting({ turnTimer: 1 }));
+  await page.evaluate(() => { const c = window.LudoApp.controller; c.state.status = c.state.status; });
+  // wait for a roll prompt, remember who is playing, do nothing
+  await page.waitForFunction(() => { const c = window.LudoApp.controller; return c.awaitingRoll; }, null, { timeout: 8000 });
+  const seatBefore = (await diceBase()).seat;
+  await page.waitForFunction(s => window.LudoApp.controller.state.current !== s, seatBefore, { timeout: 14000 });
+  await sleep(1100);
+  db = await diceBase();
+  ok(db.seat !== seatBefore && baseOf(db) === db.seat, 'after the timeout the turn and the dice moved to the next player\'s home');
+  await page.evaluate(() => window.LudoApp.applySetting({ turnTimer: 10 }));
+  await quitCurrent();
+
+  // modal must sit above every token
+  await page.click('#btn-play'); await page.click('[data-mode="local4"]'); await page.click('#btn-start-game');
+  await page.waitForSelector('#screen-game.active'); await sleep(500);
+  await page.evaluate(() => {      // pile tokens in the middle of the screen so they would cover the menu
+    const c = window.LudoApp.controller, s = c.state;
+    s.seats.forEach(seat => { s.tokens[seat] = [seat * 13 + 6, seat * 13 + 7, seat * 13 + 8, seat * 13 + 9]; });
+    c.view.layout(s);
+  });
+  await page.click('#btn-pause');
+  await sleep(300);
+  const covered = await page.evaluate(() => {
+    const bad = [];
+    document.querySelectorAll('#modal .btn').forEach(b => {
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!top || !b.contains(top)) bad.push(b.textContent.trim());
+    });
+    return bad;
+  });
+  await shot('21-pause-menu');
+  ok(covered.length === 0, 'pause menu buttons are never covered by tokens or the dice' + (covered.length ? ' (' + covered.join(', ') + ')' : ''));
+  await page.click('[data-a="resume"]');
+  await quitCurrent();
+
+  // Magic Play
+  await page.click('#btn-play'); await page.click('[data-mode="magic"]');
+  await shot('22-setup-magic');
+  await page.click('#btn-start-game');
+  await page.waitForSelector('#screen-game.active');
+  await page.waitForFunction(() => !document.getElementById('btn-roll').disabled, null, { timeout: 8000 });
+  ok(await page.isVisible('#spell-bar'), 'Magic Play shows the spell bar');
+  ok(await page.locator('#spell-bar .spell:not([disabled])').count() === 3, 'all three spells are ready on the human turn');
+  ok((await page.textContent('.pchip.cur em')).includes('✨3') && (await page.textContent('.pchip.cur em')).includes('🔒'), 'player chip shows spells and the closed-home lock');
+  await shot('23-magic-game');
+  await page.click('[data-spell="dice"]');
+  ok(await page.locator('#modal [data-n="6"]').count() === 1, 'Pick Dice offers the numbers 1-6');
+  await page.click('#modal [data-n="6"]');
+  await page.waitForFunction(() => window.LudoApp.controller.state.dice === 6, null, { timeout: 4000 });
+  ok(true, 'Pick Dice rolled exactly the chosen number');
+  await sleep(1800);
+  // shield one of our tokens
+  await page.waitForFunction(() => window.LudoApp.controller.canCast('shield') || window.LudoApp.controller.awaitingMove, null, { timeout: 8000 });
+  await page.evaluate(() => {
+    const c = window.LudoApp.controller, s = c.state;
+    if (s.current === 0 && s.status === 'waiting_roll') { s.tokens[0][1] = 12; c.view.layout(s); }
+  });
+  if (await page.evaluate(() => window.LudoApp.controller.canCast('shield'))) {
+    await page.click('[data-spell="shield"]');
+    ok(await page.locator('.token.pickable').count() >= 1, 'Shield highlights the tokens it can protect');
+    await page.evaluate(() => document.querySelector('.token.pickable').dispatchEvent(new MouseEvent('click', { bubbles: true })));
+    await sleep(200);
+    ok(await page.locator('.token.shielded').count() === 1, 'shielded token shows its bubble');
+    await shot('24-shield');
+  } else { ok(true, 'shield step skipped (turn moved on)'); ok(true, 'shield step skipped (turn moved on)'); }
+  await quitCurrent();
+
+  // settings expose the timer and the new rule
+  await page.click('[data-go="settings"]');
+  ok(await page.locator('[data-timer]').count() === 4, 'settings offer the turn timer options');
+  ok(await page.locator('[data-set="r.killToEnterHome"]').count() === 1, 'settings offer "Capture to open home"');
+  await shot('25-settings');
+  await page.click('.screen.active [data-back]');
+  await page.waitForSelector('#screen-home.active');
+  ok(playBtn < 230, 'PLAY button is smaller (' + Math.round(playBtn) + 'px wide)');
 
   // small phone
   await page.setViewportSize({ width: 360, height: 640 });

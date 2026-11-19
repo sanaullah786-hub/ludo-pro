@@ -16,6 +16,7 @@
     vibration: true,
     autoMove: true,       // play automatically when only one move is possible
     speed: 'normal',      // normal | fast
+    turnTimer: 10,        // seconds a human has to roll / move (0 = no limit)
     rules: {              // classic Ludo rules, all configurable
       sixToStart: true,
       extraTurnOnSix: true,
@@ -23,7 +24,8 @@
       extraTurnOnFinish: true,
       threeSixesForfeit: true,
       safeSquares: true,
-      exactFinish: true
+      exactFinish: true,
+      killToEnterHome: true   // a token may only enter the home lane after its owner has captured an opponent
     }
   };
 

@@ -45,6 +45,8 @@
     this._lastHumanSeat = null;
     this._lastSnapshot = null;
     this._resumedAt = 0;
+    this._timer = null;       // {left,total,phase,seat,handle}
+    this._pick = null;        // spell currently being aimed ('shield' | 'blast')
   }
 
   var P = Controller.prototype;
@@ -78,6 +80,40 @@
   };
 
   P._say = function (text, seat) { if (this.ui.message) this.ui.message(text, seat); };
+
+  // ------------------------------------------------------------ turn timer
+  /** Seconds a human has for each decision; 0 / undefined = no limit. */
+  P._limit = function () {
+    var t = Number(this.getSettings().turnTimer);
+    return t > 0 ? t : 0;
+  };
+
+  P._startTimer = function (phase, seat, onExpire) {
+    this._stopTimer();
+    var total = this._limit();
+    if (!total) return;
+    var self = this, sid = this.sid;
+    var t = { left: total, total: total, phase: phase, seat: seat, handle: null };
+    this._timer = t;
+    this._emitTimer(t);
+    t.handle = setInterval(function () {
+      if (self._timer !== t || sid !== self.sid) { clearInterval(t.handle); return; }
+      if (self.paused) return;
+      t.left = Math.max(0, t.left - 0.1);
+      self._emitTimer(t);
+      if (t.left <= 0.0001) { self._stopTimer(); onExpire(); }
+    }, 100);
+  };
+
+  P._stopTimer = function () {
+    var t = this._timer;
+    if (t) { clearInterval(t.handle); this._timer = null; }
+    if (this.ui.onTimer) this.ui.onTimer(null);
+  };
+
+  P._emitTimer = function (t) {
+    if (this.ui.onTimer) this.ui.onTimer({ left: t.left, total: t.total, phase: t.phase, seat: t.seat });
+  };
 
   P._name = function (seat) { return this.state.players[seat].name; };
 
@@ -139,6 +175,8 @@
     this.sid += 1;
     this.awaitingRoll = false;
     this.awaitingMove = false;
+    this._stopTimer();
+    this._pick = null;
     var r = this._rollResolve, m = this._moveResolve;
     this._rollResolve = null; this._moveResolve = null;
     if (r) r(null);
@@ -195,8 +233,86 @@
     return true;
   };
 
+  // ------------------------------------------------------------ magic input
+  P.canCast = function (kind) {
+    var s = this.state;
+    if (!s || !s.magic || !this.canHumanRoll()) return false;
+    if (s.players[s.current].type !== 'human') return false;
+    return (s.magic.charges[s.current][kind] || 0) > 0;
+  };
+
+  /** Pick Dice: the human chooses the number and that acts as the roll. */
+  P.requestMagicDice = function (value) {
+    if (!this.canCast('dice')) return false;
+    value = Number(value);
+    if (!(value >= 1 && value <= 6 && value % 1 === 0)) return false;
+    this._cancelPickUi();
+    this.awaitingRoll = false;
+    var r = this._rollResolve;
+    this._rollResolve = null;
+    if (r) r({ magic: 'dice', value: value });
+    return true;
+  };
+
+  /** Start aiming Shield / Blast: legal targets glow, the next tap casts. */
+  P.beginPick = function (kind) {
+    if (kind !== 'shield' && kind !== 'blast') return false;
+    if (!this.canCast(kind)) return false;
+    var cur = this.state.current;
+    var targets = E.magicTargets(this.state, kind).map(function (t) {
+      return { seat: t.seat === undefined ? cur : t.seat, token: t.token };
+    });
+    if (!targets.length) return false;
+    this._pick = kind;
+    if (this.view && this.view.setHighlights) this.view.setHighlights(targets);
+    return true;
+  };
+
+  P.cancelPick = function () { this._cancelPickUi(); };
+
+  P._cancelPickUi = function () {
+    this._pick = null;
+    if (this.view && this.view.setHighlights) this.view.setHighlights([]);
+  };
+
+  P.pickMode = function () { return this._pick; };
+
+  /** Cast Shield / Blast (no dice involved). Returns the engine result. */
+  P._castInstant = async function (kind, args) {
+    var s = this.state, seat = s.current;
+    var res = E.useMagic(s, kind, args);
+    if (!res.ok) return res;
+    this._sfx('magic');
+    this._vibrate(40);
+    this._emit('magic', { seat: seat, kind: kind, args: args, human: s.players[seat].type === 'human' });
+    if (kind === 'shield') {
+      this._say(this._name(seat) + ' cast Shield!', seat);
+    } else {
+      this._say(this._name(seat) + ' blasted ' + this._name(args.seat) + '\'s token!', seat);
+      this._sfx('capture');
+      if (this.view) this.view.sendToBase(args.seat, args.token);
+    }
+    if (res.unlockedHome) {
+      this._emit('homeUnlocked', { seat: seat, human: s.players[seat].type === 'human' });
+      this._say(this._name(seat) + ' opened the home lane!', seat);
+    }
+    if (this.view) { if (this.view.setShields) this.view.setShields(s); this.view.layout(s); }
+    if (this.ui.onStateChanged) this.ui.onStateChanged(s);
+    this._save();
+    return res;
+  };
+
   /** A token was tapped. */
   P.tapToken = function (seat, idx) {
+    if (this._pick && this.awaitingRoll && !this.paused && this.state) {
+      var kind = this._pick, s0 = this.state, self = this, args = null;
+      if (kind === 'shield' && seat === s0.current) args = { token: idx };
+      if (kind === 'blast' && seat !== s0.current) args = { seat: seat, token: idx };
+      if (!args) return false;
+      this._cancelPickUi();
+      this._castInstant(kind, args);
+      return true;
+    }
     if (!this.awaitingMove || this.paused || !this.state) return false;
     if (seat !== this.state.current) return false;
     if (this.state.validMoves.indexOf(idx) === -1) return false;
@@ -238,12 +354,19 @@
     return humans.length > 1 && this._lastHumanSeat !== null && this._lastHumanSeat !== seat;
   };
 
-  P._waitForRoll = function () {
+  P._waitForRoll = function (seat) {
     var self = this;
     return new Promise(function (resolve) {
       self._rollResolve = resolve;
       self.awaitingRoll = true;
       if (self.ui.setRollEnabled) self.ui.setRollEnabled(true);
+      self._startTimer('roll', seat, function () {
+        if (!self.awaitingRoll) return;
+        self.awaitingRoll = false;
+        self._cancelPickUi();
+        var r = self._rollResolve; self._rollResolve = null;
+        if (r) r({ timeout: true });
+      });
     });
   };
 
@@ -253,6 +376,12 @@
     return new Promise(function (resolve) {
       self._moveResolve = resolve;
       self.awaitingMove = true;
+      self._startTimer('move', s.current, function () {
+        if (!self.awaitingMove) return;
+        self.awaitingMove = false;
+        var m = self._moveResolve; self._moveResolve = null;
+        if (m) m({ timeout: true });
+      });
       if (self.view) {
         self.view.setMovable(s.current, s.validMoves);
         var targets = E.distinctMoves(s).map(function (i) {
@@ -276,23 +405,57 @@
     var cpu = p.type === 'cpu';
     this._announceTurn();
 
+    var choice = null;
     // ---- roll phase
     if (s.status === 'waiting_roll') {
       if (cpu) {
         this._say(p.name + ' is thinking...', seat);
         await this._wait(650);
+        // the computer may cast a spell before it rolls
+        var spellRoll = null;
+        if (s.magic) {
+          for (var k = 0; k < 2 && s.status === 'waiting_roll'; k++) {
+            var mg = AI.chooseMagic(s, p.difficulty, this.rng);
+            if (!mg) break;
+            if (mg.kind === 'dice') { spellRoll = mg; break; }
+            await this._castInstant(mg.kind, mg.args);
+            await this._wait(600);
+          }
+        }
+        if (spellRoll) choice = { magic: 'dice', value: spellRoll.args.value };
       } else {
         if (this.meta.mode === 'passplay' && this._needsHandOff(seat) && this.ui.confirmHandOff) {
           await this.ui.confirmHandOff({ seat: seat, name: p.name, color: p.color });
           this._chk(sid);
         }
         this._lastHumanSeat = seat;
-        this._say(p.name + ': tap ROLL', seat);
-        await this._waitForRoll();
+        this._say(p.name + ': tap the dice', seat);
+        choice = await this._waitForRoll(seat);
+        this._stopTimer();
         this._chk(sid);
       }
 
-      var r = E.rollDice(s, this.rng);
+      if (choice && choice.timeout) {
+        if (this.ui.setRollEnabled) this.ui.setRollEnabled(false);
+        this._emit('timeout', { seat: seat, phase: 'roll' });
+        this._say(p.name + ' ran out of time - turn skipped', seat);
+        E.skipTurn(s);
+        await this._wait(700);
+        this._finishPass();
+        return;
+      }
+
+      var r;
+      if (choice && choice.magic === 'dice') {
+        r = E.useMagic(s, 'dice', { value: choice.value });
+        if (r.ok) {
+          this._sfx('magic');
+          this._emit('magic', { seat: seat, kind: 'dice', args: { value: choice.value }, human: !cpu });
+          this._say(p.name + ' chose ' + choice.value + ' with Magic Dice', seat);
+        }
+      } else {
+        r = E.rollDice(s, this.rng);
+      }
       if (!r.ok) { await this._wait(120); return; }
       if (this.ui.setRollEnabled) this.ui.setRollEnabled(false);
       this._sfx('dice');
@@ -332,7 +495,16 @@
     } else {
       this._say(p.name + ' rolled ' + s.dice + ' - tap a glowing token', seat);
       idx = await this._waitForMove();
+      this._stopTimer();
       this._chk(sid);
+      if (idx && idx.timeout) {
+        // time is up: a sensible move is played for the player
+        if (this.view) { this.view.setMovable(seat, []); this.view.setTargets([]); }
+        this._emit('timeout', { seat: seat, phase: 'move' });
+        this._say(p.name + ' ran out of time - auto move', seat);
+        idx = AI.chooseMove(s, 'medium', this.rng);
+        await this._wait(400);
+      }
     }
     if (idx === null || idx === undefined) { await this._wait(100); return; }
     await this._playMove(idx, sid);
@@ -367,13 +539,19 @@
         res.captures.map(function (c) { return s.players[c.seat].name; }).join(', ') + '!', seat);
       await this._wait(460);
     }
+    if (res.unlockedHome) {
+      this._emit('homeUnlocked', { seat: seat, human: s.players[seat].type === 'human' });
+      this._say(s.players[seat].name + ' opened the home lane!', seat);
+    }
+    if (res.earnedSpell) {
+      this._emit('magic', { seat: seat, kind: 'earned', spell: res.earnedSpell, human: s.players[seat].type === 'human' });
+    }
     if (res.finishes) {
       this._sfx('home');
       this._emit('tokenHome', { seat: seat, human: s.players[seat].type === 'human' });
     }
-    if (v) { v.clearHop(); v.layout(s); }
-
     var c = E.completeMove(s);
+    if (v) { v.clearHop(); if (v.setShields) v.setShields(s); v.layout(s); }
     if (this.ui.onStateChanged) this.ui.onStateChanged(s);
     if (c.finished) { await this._finish(sid); return; }
     if (c.extraTurn) this._say(s.players[seat].name + ' gets another turn!', seat);
@@ -397,7 +575,9 @@
                  finished: E.finishedCount(s, seat), color: pl.color };
       }),
       stats: E.clone(s.stats),
-      rules: E.clone(s.rules)
+      rules: E.clone(s.rules),
+      magic: !!s.magic,
+      kills: (s.kills || [0, 0, 0, 0]).slice()
     };
     this._emit('gameOver', { summary: summary });
     await this._wait(900);
