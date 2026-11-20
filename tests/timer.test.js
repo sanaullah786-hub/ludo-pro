@@ -168,6 +168,22 @@ test('a saved Magic game restores with its spells, shields and kills', async () 
   d.destroy();
 });
 
+test('5 Minutes mode: when the clock runs out the best score wins', async () => {
+  let over = null; const clocks = [];
+  const c = new Controller({
+    rng: E.mulberry32(8), sleep: noSleep, getSettings: () => ({ speed: 'fast', turnTimer: 0 }),
+    ui: { onGameOver: s => { over = s; }, onClock: k => clocks.push(k), onError: e => { throw e; } }
+  });
+  c.start({ mode: 'timed', variant: 'timed', timeLimitMs: 700, seats: [0, 1], types: { 0: 'human', 1: 'human' }, names: { 0: 'A', 1: 'B' } });
+  await waitFor(() => c.awaitingRoll);
+  c.state.tokens[1][0] = 20;                       // B is ahead
+  await waitFor(() => over, 5000);
+  assert.strictEqual(over.variant, 'timed');
+  assert.strictEqual(over.winnerSeat, 1);
+  assert.ok(clocks.some(k => k && k.left < 700 && k.total === 700), 'the clock counted down');
+  c.destroy();
+});
+
 (async () => {
   for (const t of queue) {
     try { await t.fn(); passed++; console.log('  ok   ' + t.name); }

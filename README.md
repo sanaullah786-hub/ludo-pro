@@ -11,8 +11,11 @@ A complete offline Ludo board game for Android, built with HTML5, CSS3, JavaScri
 
 ## Features
 
-- **Game modes:** Play vs Computer (1-3 opponents), **Magic Play**, Two / Three / Four Players Offline, Pass and Play (hand-over screen between turns).
-- **3D dice:** a smooth tumbling cube that floats over the home of the player whose turn it is and glides to the next home when the turn changes. Tap the dice to roll.
+- **Menus:** a big-tile dashboard (vs Computer, Local Play, Pass & Play, Power, Tokens), a "Continue Last Game" pill and a bottom bar (History / Rewards). Pick a **game mode**, then **players and colours** (2P / 3P / 4P; each colour card cycles Nobody / Computer / Human). Six-player boards are not supported (the engine has four colours).
+- **Game modes:** Classic, **5 Minutes** (highest score when the clock ends), **Quick** (first to capture a token and bring one home), **Deathmatch** (first to 4 captures) and **Power** (magic spells).
+- **Dice holders:** every player has a dice box with an avatar beside the board; the 3D dice flies from the holder of the current player to the middle of the board, tumbles, and flies back showing the number. The screen background takes the colour of the player whose turn it is.
+- **12 token styles** (Pointy is the default, plus Chess, Coin, Gem, ...), all unlocked - no ads. Chosen on the Select Token screen and drawn as original vector art.
+- **3D dice:** a smooth tumbling cube. Tap your dice holder to roll.
 - **10 second turn timer:** a human who does not roll in time loses the turn; if no token is chosen in time a sensible move is played automatically. Configurable (Off / 10 / 15 / 20 s) in Settings.
 - **Capture to open home:** a token cannot enter the home lane until its owner has captured an opponent token (it keeps circling the board, so the game can never get stuck). Can be switched off in Settings.
 - **Magic Play spells** (cast before rolling, one of each at the start, a finished token earns another): 🎯 *Pick Dice* (choose your number), 🛡️ *Shield* (a token cannot be captured until your next turn), 💥 *Blast* (send an unprotected opponent token home; counts as a capture). The computer uses spells too. Magic can also be switched on for the offline modes.
@@ -66,7 +69,7 @@ Absolute track cell = `(START_INDEX[seat] + position) % 52`, with starts at 0 / 
 ## Tests
 
 ```bash
-npm test               # engine, kill rule + magic, AI, controller, timer, storage, economy (150 tests, no dependencies)
+npm test               # engine, kill rule + magic, AI, controller, timer, storage, economy (160+ tests, no dependencies)
 npm run test:e2e       # real-browser test; needs: npm i -D playwright && npx playwright install chromium
 npm run build          # build check: required files, JS syntax, asset references
 ```

@@ -47,6 +47,7 @@
     this._resumedAt = 0;
     this._timer = null;       // {left,total,phase,seat,handle}
     this._pick = null;        // spell currently being aimed ('shield' | 'blast')
+    this._clock = null;       // 5 Minutes mode countdown
   }
 
   var P = Controller.prototype;
@@ -159,6 +160,7 @@
     this._resumedAt = Date.now();
     var s = this.state;
     if (this.view) {
+      this.view.tokenStyle = this.getSettings().tokenStyle || 'pointy';
       this.view.setStepMs(this._stepMs());
       this.view.onTokenTap = this.tapToken.bind(this);
       this.view.build(s);
@@ -167,7 +169,47 @@
     if (this.ui.showDice) this.ui.showDice(s.dice || 1);
     if (this.ui.onStateChanged) this.ui.onStateChanged(s);
     this._save();
+    this._startClock();
     this._loop();
+  };
+
+  // ------------------------------------------------- "5 Minutes" countdown
+  P._startClock = function () {
+    this._stopClock();
+    var s = this.state;
+    if (!s || s.variant !== 'timed' || !s.timeLimitMs || s.status === 'finished') return;
+    var self = this, sid = this.sid, last = Date.now();
+    this._emitClock();
+    this._clock = setInterval(function () {
+      var now = Date.now(), dt = now - last; last = now;
+      if (sid !== self.sid) { self._stopClock(); return; }
+      if (self.paused) return;
+      s.timeUsedMs += dt;
+      self._emitClock();
+      if (s.timeUsedMs >= s.timeLimitMs) self._endTimed();
+    }, 250);
+  };
+  P._stopClock = function () { if (this._clock) { clearInterval(this._clock); this._clock = null; } };
+  P._emitClock = function () {
+    var s = this.state;
+    if (this.ui.onClock) this.ui.onClock(s && s.variant === 'timed' ? { left: Math.max(0, s.timeLimitMs - s.timeUsedMs), total: s.timeLimitMs } : null);
+  };
+  /** Time is up: stop whatever is pending and declare the best score the winner. */
+  P._endTimed = function () {
+    var s = this.state;
+    this._stopClock();
+    if (!s || s.status === 'finished') return;
+    E.endByTime(s);
+    this._stopTimer(); this._cancelPickUi();
+    this.awaitingRoll = false; this.awaitingMove = false;
+    var r = this._rollResolve, m = this._moveResolve;
+    this._rollResolve = null; this._moveResolve = null;
+    this.sid += 1;                       // abandon the running turn
+    if (r) r(null);
+    if (m) m(null);
+    if (this.view) { this.view.setMovable(s.current, []); this.view.setTargets([]); }
+    this._say("Time's up!", s.winner);
+    this._finish(this.sid);
   };
 
   /** Stop everything that is running (leaving the game screen, restarting). */
@@ -176,6 +218,7 @@
     this.awaitingRoll = false;
     this.awaitingMove = false;
     this._stopTimer();
+    this._stopClock();
     this._pick = null;
     var r = this._rollResolve, m = this._moveResolve;
     this._rollResolve = null; this._moveResolve = null;
@@ -298,6 +341,11 @@
     }
     if (this.view) { if (this.view.setShields) this.view.setShields(s); this.view.layout(s); }
     if (this.ui.onStateChanged) this.ui.onStateChanged(s);
+    if (res.won) {                       // a Blast completed the winning condition
+      E.completeMove(s);
+      await this._finish(this.sid);
+      return res;
+    }
     this._save();
     return res;
   };
@@ -568,6 +616,8 @@
       turns: s.turn,
       durationMs: this.elapsedMs(),
       mode: this.meta.mode,
+      variant: s.variant,
+      scores: s.seats.reduce(function (o, seat) { o[seat] = E.variantScore(s, seat); return o; }, {}),
       ownerSeat: this.meta.ownerSeat,
       players: s.seats.map(function (seat) {
         var pl = s.players[seat];
@@ -577,7 +627,8 @@
       stats: E.clone(s.stats),
       rules: E.clone(s.rules),
       magic: !!s.magic,
-      kills: (s.kills || [0, 0, 0, 0]).slice()
+      kills: (s.kills || [0, 0, 0, 0]).slice(),
+      lost: (s.lost || [0, 0, 0, 0]).slice()
     };
     this._emit('gameOver', { summary: summary });
     await this._wait(900);

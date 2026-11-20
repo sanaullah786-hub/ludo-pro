@@ -13,8 +13,17 @@
   var COLOR_NAME = ['Red', 'Green', 'Yellow', 'Blue'];
   var CPU_NAMES = ['Bolt', 'Nova', 'Zed', 'Rex'];
   var AVATARS = ['😎', '🤠', '🦊', '🐼', '🦁', '🐯', '🐸', '🐵', '🦄', '🐲', '👑', '🚀', '⚡', '🔥', '🎲', '🏆', '🌟', '🎯'];
-  var MODE_LABEL = { cpu: 'vs Computer', local2: '2 Players', local3: '3 Players', local4: '4 Players', passplay: 'Pass & Play', magic: '🪄 Magic Play' };
-  var SCREENS = ['splash', 'home', 'modes', 'setup', 'game', 'result', 'settings', 'history', 'profile', 'rewards'];
+  var MODE_LABEL = { cpu: 'vs Computer', local2: '2 Players', local3: '3 Players', local4: '4 Players', passplay: 'Pass & Play', magic: '\uD83E\uDE84 Magic Play' };
+  var KIND_LABEL = { cpu: 'Solo', local2: 'Local', local3: 'Local', local4: 'Local', passplay: 'Pass & Play', magic: 'Solo' };
+  var VARIANTS = {
+    classic:    { label: 'Classic',    icon: '\uD83C\uDFB2', goal: 'Home all 4 pawns', info: 'Bring all four of your pawns home first. Roll a six to leave the base; capture opponents to open your home lane.' },
+    timed:      { label: '5 Minutes',  icon: '\u23F1',   goal: 'Top score wins',   info: 'You have 5 minutes. Score = board progress + 60 per capture + 40 per pawn at home. The highest score when the clock ends wins (all four pawns home also wins).' },
+    quick:      { label: 'Quick',      icon: '\uD83D\uDC07', goal: '1 kill + 1 home', info: 'Capture one opponent pawn and bring one of your own pawns home - the first player to do both wins.' },
+    deathmatch: { label: 'Deathmatch', icon: '\uD83D\uDC80', goal: 'First to 4 kills', info: 'Capture four opponent pawns first to win. Spells and normal captures both count.' },
+    power:      { label: 'Power',      icon: '\u270A',   goal: 'Spells enabled',   info: 'Classic rules plus spells: Pick Dice (choose your number), Shield (protect a pawn) and Blast (send an opponent pawn home). Bringing a pawn home earns another spell.' }
+  };
+  var SEAT_AVATARS = ['\uD83D\uDE0E', '\uD83E\uDD20', '\uD83E\uDD8A', '\uD83D\uDC3C'];
+  var SCREENS = ['splash', 'home', 'modes', 'setup', 'tokens', 'game', 'result', 'settings', 'history', 'profile', 'rewards'];
 
   function $(id) { return document.getElementById(id); }
   function esc(s) {
@@ -45,7 +54,7 @@
     if (timers.rewards) { clearInterval(timers.rewards); timers.rewards = null; }
     SCREENS.forEach(function (s) { $('screen-' + s).classList.toggle('active', s === name); });
     current = name;
-    var render = { home: renderHome, setup: renderSetup, settings: renderSettings, history: renderHistory,
+    var render = { home: renderHome, modes: renderModes, setup: renderSetup, tokens: renderTokens, settings: renderSettings, history: renderHistory,
                    profile: renderProfile, rewards: renderRewards }[name];
     if (render) render();
   }
@@ -98,16 +107,19 @@
 
   // ------------------------------------------------------------------ home
   function renderHome() {
-    var p = D.getProfile(), lv = Eco.levelInfo();
+    var p = D.getProfile(), st = p.stats;
     $('home-avatar').textContent = p.avatar;
     $('home-name').textContent = p.name;
-    $('home-level').textContent = 'Level ' + lv.level;
+    $('home-games').textContent = st.games;
+    $('home-wins').textContent = st.wins;
+    $('home-rate').textContent = st.games ? Math.round(st.wins / st.games * 100) : 0;
+    $('home-token-art').innerHTML = B.tokenSvg(settings.tokenStyle || 'pointy', 0);
     refreshCoins();
     var saved = D.getSavedGame();
     $('btn-continue').hidden = !saved;
     if (saved) {
-      var st = saved.state;
-      $('continue-info').textContent = (MODE_LABEL[saved.meta.mode] || 'Game') + ' · ' + st.seats.length + ' players · ' + fmtDate(saved.savedAt);
+      var sv = saved.state, vr = VARIANTS[sv.variant] ? VARIANTS[sv.variant].label : 'Classic';
+      $('continue-info').textContent = (KIND_LABEL[saved.meta.mode] || 'Game') + ' \u00B7 ' + vr + ' \u00B7 ' + sv.seats.length + ' players';
     }
     if (!dailyShown && Eco.dailyBonus().available) {
       dailyShown = true;
@@ -134,96 +146,145 @@
     };
   }
 
-  // -------------------------------------------------------- player selection
-  function openSetup(mode) {
+  // ------------------------------------------- mode, players and colour selection
+  var KIND_TITLE = { cpu: 'Computer', power: 'Computer', local: 'Local', passplay: 'Pass & Play' };
+  var CARD_ORDER = [0, 1, 3, 2];            // board corners: top-left, top-right, bottom-left, bottom-right
+  var tokenPreview = null;
+
+  function openKind(kind) {
     var p = D.getProfile();
-    setup = {
-      mode: mode, humanSeat: 0, opp: 1, diff: 'medium', magic: mode === 'magic',
-      seats: [0, 1, 2, 3].map(function (s) { return { on: false, name: s === 0 ? p.name : 'Player ' + (s + 1) }; })
-    };
-    var defaults = { local2: [0, 2], local3: [0, 1, 2], local4: [0, 1, 2, 3], passplay: [0, 1, 2] }[mode] || [];
-    defaults.forEach(function (s) { setup.seats[s].on = true; });
-    go('setup');
+    setup = { kind: kind, variant: kind === 'power' ? 'power' : 'classic', n: 2, diff: 'medium', name: p.name, roles: ['none', 'none', 'none', 'none'] };
+    autoAssign(2);
+    go('modes');
   }
 
-  function isCpuMode() { return setup && (setup.mode === 'cpu' || setup.mode === 'magic'); }
-  function needCount() { return { local2: 2, local3: 3, local4: 4 }[setup.mode] || 0; }
-  function activeSeats() { return [0, 1, 2, 3].filter(function (s) { return setup.seats[s].on; }); }
+  function isCpuKind() { return setup.kind === 'cpu' || setup.kind === 'power'; }
+  function activeSeats() { return [0, 1, 2, 3].filter(function (s) { return setup.roles[s] !== 'none'; }); }
+  function humanSeatOf() { for (var s = 0; s < 4; s++) if (setup.roles[s] === 'human') return s; return 0; }
   function oppSeats(h, n) { return [(h + 2) % 4, (h + 1) % 4, (h + 3) % 4].slice(0, n); }
 
+  /** Pick a sensible set of colours for n players. */
+  function autoAssign(n) {
+    setup.n = n;
+    var roles = ['none', 'none', 'none', 'none'];
+    if (isCpuKind()) {
+      var h = setup.roles.indexOf('human'); if (h < 0) h = 0;
+      roles[h] = 'human';
+      oppSeats(h, n - 1).forEach(function (s) { roles[s] = 'cpu'; });
+    } else {
+      ({ 2: [0, 2], 3: [0, 1, 2], 4: [0, 1, 2, 3] })[n].forEach(function (s) { roles[s] = 'human'; });
+    }
+    setup.roles = roles;
+  }
+
   function setupValid() {
-    if (isCpuMode()) return true;
-    var k = activeSeats().length, n = needCount();
-    return n ? k === n : k >= 2;
+    var act = activeSeats();
+    if (act.length < 2) return false;
+    if (isCpuKind()) {
+      var hs = act.filter(function (s) { return setup.roles[s] === 'human'; }).length;
+      return hs === 1;
+    }
+    return true;
+  }
+
+  function renderModes() {
+    if (!setup) { goRoot('home'); return; }
+    Array.prototype.forEach.call(document.querySelectorAll('#variant-list .variant'), function (b) {
+      b.classList.toggle('sel', b.getAttribute('data-variant') === setup.variant);
+    });
   }
 
   function renderSetup() {
-    if (!setup) { show('modes'); return; }
-    var body = $('setup-body'), html = '';
-    $('setup-title').textContent = MODE_LABEL[setup.mode];
-    if (isCpuMode()) {
-      html += '<div class="card"><h3>Your colour</h3><div class="swatches">';
-      for (var s = 0; s < 4; s++) html += '<button class="swatch' + (setup.humanSeat === s ? ' sel' : '') + '" data-hs="' + s + '" style="--c:' + COLOR_HEX[s] + '" aria-label="' + COLOR_NAME[s] + '"></button>';
-      html += '</div></div><div class="card"><h3>Opponents</h3><div class="pick-row">';
-      [1, 2, 3].forEach(function (n) { html += '<button class="pick' + (setup.opp === n ? ' sel' : '') + '" data-opp="' + n + '">' + n + (n === 1 ? ' Computer' : ' Computers') + '</button>'; });
-      html += '</div><div class="opp-list">';
-      oppSeats(setup.humanSeat, setup.opp).forEach(function (os) {
-        html += '<div class="opp" style="--c:' + COLOR_HEX[os] + '"><i></i>' + CPU_NAMES[os] + '</div>';
+    if (!setup) { show('home'); return; }
+    var body = $('setup-body'), style = settings.tokenStyle || 'pointy', html = '';
+    $('setup-title').textContent = KIND_TITLE[setup.kind];
+    $('setup-chip').textContent = 'Normal · ' + VARIANTS[setup.variant].label;
+    html += '<div class="ribbon">SELECT PLAYERS</div><div class="count-row">';
+    [2, 3, 4].forEach(function (n) {
+      var seats = ({ 2: [3, 1], 3: [3, 1, 0], 4: [3, 1, 0, 2] })[n];
+      html += '<button class="count-card' + (activeSeats().length === n ? ' sel' : '') + '" data-n="' + n + '"><span class="mini">' +
+        seats.map(function (s) { return '<span class="mt">' + B.tokenSvg(style, s) + '</span>'; }).join('') + '</span><b>' + n + 'P</b></button>';
+    });
+    html += '</div><div class="ribbon">SELECT COLOR</div><div class="color-grid">';
+    CARD_ORDER.forEach(function (seat) {
+      var role = setup.roles[seat];
+      html += '<button class="color-card' + (role !== 'none' ? ' on' : '') + '" data-seat="' + seat + '" style="--c:' + COLOR_HEX[seat] + '">' +
+        '<span class="cc-token">' + B.tokenSvg(style, seat) + '</span>' +
+        '<span class="role role-' + role + '">' + ({ none: 'Nobody', cpu: 'Computer', human: 'Human' })[role] + '</span></button>';
+    });
+    html += '</div>';
+    if (isCpuKind()) {
+      html += '<div class="ribbon small">DIFFICULTY</div><div class="seg">';
+      [['easy', 'Easy'], ['medium', 'Medium'], ['hard', 'Hard']].forEach(function (d) {
+        html += '<button class="' + (setup.diff === d[0] ? 'sel' : '') + '" data-diff="' + d[0] + '">' + d[1] + '</button>';
       });
-      html += '</div></div><div class="card"><h3>Difficulty</h3><div class="pick-row">';
-      [['easy', '😊 Easy'], ['medium', '🙂 Medium'], ['hard', '😈 Hard']].forEach(function (d) {
-        html += '<button class="pick' + (setup.diff === d[0] ? ' sel' : '') + '" data-diff="' + d[0] + '">' + d[1] + '</button>';
-      });
-      html += '</div><p class="note" style="margin-top:10px">' + ({
-        easy: 'Easy picks a random legal move.',
-        medium: 'Medium captures when it can and pushes tokens towards home.',
-        hard: 'Hard weighs wins, captures, safe squares and danger on every move.'
-      })[setup.diff] + '</p></div>';
-      html += '<div class="card"><h3>Your name</h3><input class="name-input" id="cpu-name" maxlength="14" value="' + esc(setup.seats[0].name) + '"></div>';
-    } else {
-      var n = needCount();
-      html += '<p class="note" style="margin:0 4px 10px">' + (n ? 'Choose exactly ' + n + ' colours' : 'Choose 2 to 4 colours') +
-        ' and enter each player\'s name. ' + activeSeats().length + ' selected.</p>';
-      for (var q = 0; q < 4; q++) {
-        var r = setup.seats[q];
-        html += '<div class="seat-row ' + (r.on ? 'on' : 'off') + '" style="--c:' + COLOR_HEX[q] + '">' +
-          '<span class="seat-token"></span>' +
-          '<input type="text" maxlength="14" data-name="' + q + '" value="' + esc(r.name) + '" aria-label="' + COLOR_NAME[q] + ' player name"' + (r.on ? '' : ' disabled') + '>' +
-          '<button class="switch ' + (r.on ? 'on' : '') + '" data-tog="' + q + '" aria-label="Toggle ' + COLOR_NAME[q] + '"></button></div>';
-      }
-      if (setup.mode === 'passplay') html += '<p class="note" style="margin:6px 4px">A hand-over screen appears before each player\'s turn so the phone can be passed around.</p>';
+      html += '</div>';
     }
-    if (setup.mode === 'magic') {
-      html += '<div class="card"><h3>\uD83E\uDE84 Magic spells</h3><p class="note" style="margin:0">Every player starts with one <b>Pick Dice</b> \uD83C\uDFAF, one <b>Shield</b> \uD83D\uDEE1\uFE0F and one <b>Blast</b> \uD83D\uDCA5. Cast a spell before rolling. Bringing a token home earns another spell.</p></div>';
-    } else {
-      html += '<div class="card"><div class="row" style="padding:0;border:0"><div class="grow"><span class="setting-title">\uD83E\uDE84 Magic spells</span><br><small>Pick Dice, Shield and Blast for everyone</small></div>' +
-        '<button class="switch ' + (setup.magic ? 'on' : '') + '" data-magic="1" aria-label="Magic spells"></button></div></div>';
-    }
+    html += '<div class="name-row"><label for="cpu-name">Your name</label><input class="name-input" id="cpu-name" maxlength="14" value="' + esc(setup.name) + '"></div>';
+    html += '<p class="hint' + (setupValid() ? '' : ' bad') + '" id="setup-hint">' + setupHint() + '</p>';
     body.innerHTML = html;
     $('btn-start-game').disabled = !setupValid();
   }
 
+  function setupHint() {
+    var k = activeSeats().length;
+    if (k < 2) return 'Choose at least 2 players. Tap a colour to change it.';
+    if (isCpuKind()) return setupValid() ? k + ' players: tap a colour to switch Nobody → Computer → Human.' : 'Exactly one colour must be Human.';
+    return k + ' players on this device. Tap a colour to add or remove a player.';
+  }
+
+  function cycleRole(seat) {
+    var r = setup.roles[seat];
+    if (isCpuKind()) {
+      if (r === 'none') setup.roles[seat] = 'cpu';
+      else if (r === 'cpu') {
+        for (var q = 0; q < 4; q++) if (setup.roles[q] === 'human') setup.roles[q] = 'cpu';   // only one human
+        setup.roles[seat] = 'human';
+      } else {
+        // human -> nobody; the first computer takes over as the human so a game is always possible
+        setup.roles[seat] = 'none';
+        var nxt = [0, 1, 2, 3].filter(function (q) { return setup.roles[q] === 'cpu'; })[0];
+        if (nxt !== undefined) setup.roles[nxt] = 'human';
+      }
+    } else {
+      setup.roles[seat] = r === 'none' ? 'human' : 'none';
+    }
+    setup.n = activeSeats().length;
+  }
+
   function startFromSetup() {
     if (!setupValid()) return;
-    var config, rules = D.getSettings().rules;
-    if (isCpuMode()) {
-      var h = setup.humanSeat, opps = oppSeats(h, setup.opp);
-      var seats = [h].concat(opps).sort();
-      var types = {}, names = {}, difficulty = {};
-      var nm = setup.seats[0].name.trim() || 'Player';
-      seats.forEach(function (s) {
-        if (s === h) { names[s] = nm; types[s] = 'human'; }
-        else { names[s] = CPU_NAMES[s]; types[s] = 'cpu'; difficulty[s] = setup.diff; }
-      });
-      config = { mode: setup.mode, seats: seats, types: types, names: names, difficulty: difficulty, rules: rules, firstSeat: h, magic: !!setup.magic };
-    } else {
-      var act = activeSeats(), nms = {};
-      act.forEach(function (s) { nms[s] = setup.seats[s].name.trim() || 'Player ' + (s + 1); });
-      config = { mode: setup.mode === 'passplay' ? 'passplay' : setup.mode, seats: act, names: nms, rules: rules, firstSeat: act[0], magic: !!setup.magic };
-    }
-    if (config.mode !== 'cpu' && config.mode !== 'passplay') config.mode = config.mode; // local2/3/4 keep their id
-    D.updateProfile({ name: config.names[config.seats.filter(function (s) { return !config.types || config.types[s] !== 'cpu'; })[0]] });
+    var rules = D.getSettings().rules, act = activeSeats(), variant = setup.variant;
+    var types = {}, names = {}, difficulty = {}, firstHuman = true, nm = (setup.name || '').trim() || 'Player';
+    act.forEach(function (s) {
+      if (setup.roles[s] === 'cpu') { types[s] = 'cpu'; names[s] = CPU_NAMES[s]; difficulty[s] = setup.diff; }
+      else { types[s] = 'human'; names[s] = firstHuman ? nm : 'Player ' + (s + 1); firstHuman = false; }
+    });
+    var mode = isCpuKind() ? 'cpu' : (setup.kind === 'passplay' ? 'passplay' : 'local' + act.length);
+    var first = isCpuKind() ? humanSeatOf() : act[0];
+    var config = { mode: mode, variant: variant, seats: act, types: types, names: names, difficulty: difficulty,
+                   rules: rules, firstSeat: first, magic: variant === 'power' };
+    D.updateProfile({ name: nm });
     launch(config, null);
+  }
+
+  // ------------------------------------------------------------ token styles
+  function renderTokens() {
+    var cur = settings.tokenStyle || 'pointy';
+    if (!tokenPreview) tokenPreview = cur;
+    var stage = [2, 1, 0, 3].map(function (s) { return '<span class="ts-tok">' + B.tokenSvg(tokenPreview, s) + '</span>'; }).join('');
+    $('tok-stage').innerHTML = '<div class="ts-plat"></div><div class="ts-row">' + stage + '</div>';
+    var label = B.TOKEN_STYLES.filter(function (t) { return t.id === tokenPreview; })[0];
+    $('tok-name').textContent = label ? label.label : tokenPreview;
+    $('tok-grid').innerHTML = B.TOKEN_STYLES.map(function (t) {
+      return '<button class="tok-card' + (t.id === tokenPreview ? ' sel' : '') + '" data-tok="' + t.id + '">' +
+        (t.id === cur ? '<i class="tick">✓</i>' : '') +
+        '<span class="tc-grid">' + [2, 1, 0, 3].map(function (s) { return '<span>' + B.tokenSvg(t.id, s) + '</span>'; }).join('') + '</span>' +
+        '<b>' + t.label + '</b></button>';
+    }).join('');
+    var eq = $('btn-equip');
+    eq.disabled = tokenPreview === cur;
+    eq.textContent = tokenPreview === cur ? 'Equipped ✓' : 'Equip';
   }
 
   // -------------------------------------------------------------------- game
@@ -234,7 +295,7 @@
       view: view, audio: A,
       getSettings: function () { return settings; },
       ui: {
-        onGameStart: onGameStart, onTurn: onTurn, setRollEnabled: setRollEnabled, onTimer: onTimer,
+        onGameStart: onGameStart, onTurn: onTurn, setRollEnabled: setRollEnabled, onTimer: onTimer, onClock: onClock,
         animateDice: animateDice, showDice: showDice, message: message, onStateChanged: onStateChanged,
         confirmHandOff: confirmHandOff, save: function (snap) { D.saveGame(snap); },
         onEvent: onEvent, onGameOver: onGameOver,
@@ -259,68 +320,115 @@
     }
   }
 
-  function onGameStart(info) {
-    var s = info.state;
-    $('game-mode').textContent = MODE_LABEL[info.meta.mode] || 'Ludo Pro';
-    var html = '';
-    s.seats.forEach(function (seat) {
-      var p = s.players[seat];
-      html += '<div class="pchip" data-seat="' + seat + '" style="--c:' + COLOR_HEX[seat] + '"><i></i><span><b>' +
-        (p.type === 'cpu' ? '🤖 ' : '') + esc(p.name) + '</b><em>🏠 0/4</em></span></div>';
+  // ---- holders: every player has a dice box beside the board
+  var BG_COLORS = ['#8a1f2e', '#1f7a3c', '#b3720c', '#1b4fa8'];
+  var diceFlying = false;
+
+  function avatarFor(seat, s) {
+    var p = s.players[seat];
+    if (p.type === 'cpu') return '🤖';
+    return seat === (ctrl && ctrl.meta ? ctrl.meta.ownerSeat : 0) ? D.getProfile().avatar : SEAT_AVATARS[seat];
+  }
+  function holderEl(seat) { return document.querySelector('#screen-game .holder[data-seat="' + seat + '"]'); }
+  function boxEl(seat) { var h = holderEl(seat); return h && h.querySelector('.hold-box'); }
+  function pipsHtml(v) { return '<span class="pips p' + v + '"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>'; }
+
+  function buildHolders(s) {
+    [0, 1, 2, 3].forEach(function (seat) {
+      var h = holderEl(seat), left = seat === 0 || seat === 3;
+      var on = s.seats.indexOf(seat) !== -1;
+      h.classList.toggle('off', !on);
+      h.style.setProperty('--c', COLOR_HEX[seat]);
+      if (!on) { h.innerHTML = ''; return; }
+      var stats = '<span class="hold-stats"><span class="hs" title="Captures">⚔ <b class="k">0</b></span><span class="hs" title="Pawns lost">💀 <b class="l">0</b></span></span>';
+      var box = '<span class="hold-ring"><button class="hold-box" data-seat="' + seat + '" aria-label="' + esc(s.players[seat].name) + ' dice">' +
+        '<span class="hb-face">' + avatarFor(seat, s) + '</span><span class="hb-pips"></span>' +
+        '<span class="hb-timer" hidden><b>10</b></span></button></span><span class="hold-hand">👆</span>';
+      h.innerHTML = left ? stats + box : box + stats;
     });
-    $('players-strip').innerHTML = html;
-    $('btn-roll').disabled = true;
-    $('spell-bar').hidden = !s.magic;
+  }
+
+  function resetHolders(s) {
+    s.seats.forEach(function (seat) {
+      var b = boxEl(seat);
+      if (!b) return;
+      b.classList.remove('ready', 'cur');
+      holderEl(seat).classList.remove('cur', 'ready');
+      if (seat === s.current) {            // a new turn starts: show the avatar again
+        b.classList.remove('rolled');
+        b.querySelector('.hb-pips').innerHTML = '';
+      }
+    });
+  }
+
+  function onGameStart(info) {
+    var s = info.state, v = VARIANTS[s.variant] || VARIANTS.classic;
+    $('game-mode').textContent = KIND_LABEL[info.meta.mode] || 'Ludo';
+    $('game-variant').textContent = v.label;
+    buildHolders(s);
     pickKind = null;
-    placeDice(s.current, true);
+    sizeDice();
+    $('spell-bar').hidden = !s.magic;
+    $('dice-spot').hidden = true;
     message('Get ready!', s.current);
+    onTurn({ seat: s.current, state: s });
     updateStrip(s);
+    onClock(s.variant === 'timed' ? { left: Math.max(0, s.timeLimitMs - s.timeUsedMs), total: s.timeLimitMs } : null);
   }
 
   function updateStrip(s) {
-    var chips = $('players-strip').children;
-    for (var i = 0; i < chips.length; i++) {
-      var seat = Number(chips[i].getAttribute('data-seat'));
-      chips[i].classList.toggle('cur', seat === s.current && s.status !== 'finished');
-      var extra = '';
-      if (s.rules.killToEnterHome) extra += (s.kills[seat] > 0 ? ' 🔓' : ' 🔒');
-      if (s.magic) { var ch = s.magic.charges[seat]; extra += ' ✨' + (ch.dice + ch.shield + ch.blast); }
-      chips[i].querySelector('em').textContent = '🏠 ' + E.finishedCount(s, seat) + '/4' + extra;
-    }
+    s.seats.forEach(function (seat) {
+      var h = holderEl(seat);
+      if (!h) return;
+      var k = h.querySelector('.k'), l = h.querySelector('.l');
+      if (k) k.textContent = s.kills[seat];
+      if (l) l.textContent = s.lost ? s.lost[seat] : 0;
+    });
     updateSpells(s);
-    $('game-turn').textContent = 'Turn ' + s.turn;
+    var v = VARIANTS[s.variant] || VARIANTS.classic;
+    if (s.variant !== 'timed') {
+      $('goal-main').textContent = v.icon + ' ' + v.label;
+      $('goal-sub').textContent = v.goal + ' · Turn ' + s.turn;
+    } else {
+      $('goal-sub').textContent = 'Top score wins · Turn ' + s.turn;
+    }
+  }
+
+  function onClock(c) {
+    if (!c) return;
+    var sec = Math.ceil(c.left / 1000);
+    $('goal-main').textContent = '⏱ ' + Math.floor(sec / 60) + ':' + (sec % 60 < 10 ? '0' : '') + (sec % 60);
+    $('goal-main').classList.toggle('warn', sec <= 30);
   }
 
   function onTurn(info) {
-    $('dice').style.setProperty('--dc', COLOR_HEX[info.seat]);
-    $('btn-roll').disabled = true;
-    if (pickKind) { pickKind = null; }
-    placeDice(info.seat, false);
-    updateStrip(info.state);
+    var seat = info.seat, s = info.state || ctrl.state;
+    $('game-bg').style.background = BG_COLORS[seat];
+    $('dice').style.setProperty('--dc', COLOR_HEX[seat]);
+    if (pickKind) pickKind = null;
+    resetHolders(s);
+    var h = holderEl(seat);
+    if (h) h.classList.add('cur');
+    var b = boxEl(seat);
+    if (b) b.classList.add('cur');
+    updateStrip(s);
   }
   function onStateChanged(s) { updateStrip(s); }
   function setRollEnabled(on) {
-    $('btn-roll').disabled = !on;
-    $('dice-spot').classList.toggle('ready', !!on);
-    if (!on && pickKind) { pickKind = null; }
+    var s = ctrl && ctrl.state;
+    if (s) {
+      var h = holderEl(s.current), b = boxEl(s.current);
+      if (b) b.classList.toggle('ready', !!on);
+      if (h) h.classList.toggle('ready', !!on);
+    }
+    if (!on && pickKind) pickKind = null;
     if (ctrl && ctrl.state) updateSpells(ctrl.state);
   }
 
-  // ---- the 3D dice lives over the board and sits on the current player's home
+  // ---- the 3D dice leaves the holder, tumbles over the middle of the board and flies back
   var diceAngle = { x: 0, y: 0 };
   var DICE_FACE = { 1: [0, 0], 2: [90, 0], 3: [0, -90], 4: [0, 90], 5: [-90, 0], 6: [0, 180] };
-  function sizeDice() {
-    var b = $('board'), w = b.clientWidth;
-    if (w) b.style.setProperty('--half', (w * 0.047).toFixed(2) + 'px');
-  }
-  function placeDice(seat, instant) {
-    sizeDice();
-    var h = $('dice-spot'), c = B.BASE_CENTRES[seat];
-    if (instant) h.classList.add('no-move');
-    h.style.left = (c[0] / 15 * 100) + '%';
-    h.style.top = (c[1] / 15 * 100) + '%';
-    if (instant) { void h.offsetWidth; h.classList.remove('no-move'); }
-  }
+  function sizeDice() { /* the cube is sized when it is launched */ }
   function setDiceFace(v, spins) {
     var d = $('dice'), f = DICE_FACE[v] || DICE_FACE[1];
     var x = f[0], y = f[1];
@@ -344,13 +452,18 @@
   }
 
   function onTimer(t) {
-    var el = $('turn-timer');
-    if (!t) { el.hidden = true; return; }
-    el.hidden = false;
-    var left = Math.ceil(t.left - 0.0001);
-    el.querySelector('b').textContent = String(Math.max(0, left));
-    el.style.setProperty('--p', String(Math.max(0, t.left / t.total) * 360) + 'deg');
-    el.classList.toggle('warn', t.left <= 3);
+    var s = ctrl && ctrl.state;
+    [0, 1, 2, 3].forEach(function (seat) {
+      var b = boxEl(seat);
+      if (!b) return;
+      var tm = b.querySelector('.hb-timer');
+      var ring = b.parentNode;
+      if (!t || t.seat !== seat) { tm.hidden = true; ring.style.removeProperty('--p'); return; }
+      tm.hidden = false;
+      tm.querySelector('b').textContent = String(Math.max(0, Math.ceil(t.left - 0.0001)));
+      ring.style.setProperty('--p', String(Math.max(0, t.left / t.total) * 360) + 'deg');
+      tm.classList.toggle('warn', t.left <= 3);
+    });
   }
 
   // ---- magic spells
@@ -359,7 +472,6 @@
     var bar = $('spell-bar');
     if (!s || !s.magic) { bar.hidden = true; return; }
     bar.hidden = false;
-    // show the charges of the human who is playing (or the owner while the computer plays)
     var seat = s.players[s.current].type === 'human' ? s.current : (ctrl.meta ? ctrl.meta.ownerSeat : s.current);
     var ch = s.magic.charges[seat];
     ['dice', 'shield', 'blast'].forEach(function (k) {
@@ -401,21 +513,52 @@
   function message(text, seat) {
     var el = $('status-line');
     el.textContent = text;
-    el.style.color = seat !== undefined && seat !== null ? ['#ff9c9c', '#9dff9d', '#fff0a0', '#a8ceff'][seat] : '';
+    el.style.color = seat !== undefined && seat !== null ? ['#ffd0d0', '#d0ffd0', '#fff6c0', '#d0e4ff'][seat] : '';
+  }
+
+  function relRect(el, root) {
+    var r = el.getBoundingClientRect(), g = root.getBoundingClientRect();
+    return { x: r.left - g.left + r.width / 2, y: r.top - g.top + r.height / 2, w: r.width, h: r.height };
   }
 
   function animateDice(seat, value) {
     return new Promise(function (resolve) {
-      var h = $('dice-spot');
-      h.classList.remove('six', 'hop');
-      void h.offsetWidth;
-      h.classList.add('hop');
-      setDiceFace(value, 2);          // smooth multi-turn tumble that lands on the rolled face
+      var spot = $('dice-spot'), game = $('screen-game'), box = boxEl(seat);
+      if (!box) { setDiceFace(value, 2); setTimeout(resolve, 600); return; }
+      var from = relRect(box, game), to = relRect($('board'), game);
+      var size = Math.round(Math.min(from.w, from.h) * 0.8), big = Math.min(to.w * 0.2, 96) / size;
+      var sx = from.x - size / 2, sy = from.y - size / 2, ex = to.x - size / 2, ey = to.y - size / 2;
+      diceFlying = true;
+      spot.hidden = false;
+      spot.className = 'dice-fly';
+      spot.style.width = spot.style.height = size + 'px';
+      spot.style.setProperty('--half', (size / 2) + 'px');
+      spot.style.setProperty('--dc', COLOR_HEX[seat]);
+      spot.style.transition = 'none';
+      spot.style.transform = 'translate(' + sx + 'px,' + sy + 'px) scale(1)';
+      box.classList.add('away');
+      box.classList.remove('ready');
+      void spot.offsetWidth;
+      spot.style.transition = 'transform .42s cubic-bezier(.2,.8,.25,1.15)';
+      spot.style.transform = 'translate(' + ex + 'px,' + ey + 'px) scale(' + big.toFixed(2) + ')';
+      setDiceFace(value, 3);                                   // tumbles on the way and over the board
       setTimeout(function () {
-        h.classList.remove('hop');
-        if (value === 6) { void h.offsetWidth; h.classList.add('six'); }
-        resolve();
-      }, 820);
+        spot.classList.add('landed');
+        if (value === 6) spot.classList.add('six');
+      }, 900);
+      setTimeout(function () { resolve(); }, 1180);
+      setTimeout(function () {                                  // fly back and show the number in the holder
+        spot.style.transition = 'transform .34s cubic-bezier(.5,0,.7,.4)';
+        spot.style.transform = 'translate(' + sx + 'px,' + sy + 'px) scale(1)';
+      }, 1200);
+      setTimeout(function () {
+        spot.hidden = true;
+        spot.className = 'dice-fly';
+        box.classList.remove('away');
+        box.classList.add('rolled');
+        box.querySelector('.hb-pips').innerHTML = pipsHtml(value);
+        diceFlying = false;
+      }, 1560);
     });
   }
 
@@ -502,7 +645,7 @@
     var reward = Eco.awardGame({ won: won, captures: st.captures[owner], vsCpu: vsCpu, difficulty: diff });
     var winner = sum.players.filter(function (p) { return p.seat === sum.winnerSeat; })[0];
     D.addHistory({
-      t: Date.now(), mode: sum.mode, winnerSeat: sum.winnerSeat, winnerName: winner.name, ownerWon: won,
+      t: Date.now(), mode: sum.mode, variant: sum.variant || 'classic', winnerSeat: sum.winnerSeat, winnerName: winner.name, ownerWon: won,
       ownerName: sum.players.filter(function (p) { return p.seat === owner; })[0].name,
       players: sum.players.map(function (p) { return { name: p.name, seat: p.seat, finished: p.finished, cpu: p.type === 'cpu' }; }),
       durationMs: sum.durationMs, turns: sum.turns, coins: reward.coins
@@ -510,13 +653,15 @@
     D.clearSavedGame();
 
     $('res-title').textContent = (vsCpu ? (won ? 'Victory!' : 'Defeat') : winner.name + ' wins!');
-    $('res-sub').textContent = (vsCpu ? winner.name + ' (' + COLOR_NAME[winner.seat] + ') won this match' : COLOR_NAME[winner.seat] + ' completed all four tokens') +
-      ' · ' + fmtDur(sum.durationMs) + ' · ' + sum.turns + ' turns';
+    var vr = VARIANTS[sum.variant] || VARIANTS.classic;
+    var how = ({ classic: 'completed all four tokens', power: 'completed all four tokens', timed: 'had the top score', quick: 'captured and got home first', deathmatch: 'won the Deathmatch' })[sum.variant || 'classic'];
+    $('res-sub').textContent = vr.label + ' \u00B7 ' + (vsCpu ? winner.name + ' (' + COLOR_NAME[winner.seat] + ') won this match' : COLOR_NAME[winner.seat] + ' ' + how) +
+      ' \u00B7 ' + fmtDur(sum.durationMs) + ' \u00B7 ' + sum.turns + ' turns';
     var medals = ['🥇', '🥈', '🥉', '4️⃣'];
     $('res-ranks').innerHTML = '<h3 style="margin:0 0 6px;color:var(--gold-2)">Final ranking</h3>' + sum.rankings.map(function (seat, i) {
       var p = sum.players.filter(function (x) { return x.seat === seat; })[0];
       return '<div class="rank-row" style="--c:' + COLOR_HEX[seat] + '"><span class="rank-no">' + medals[i] + '</span><span class="rank-dot"></span>' +
-        '<b style="flex:1">' + (p.type === 'cpu' ? '🤖 ' : '') + esc(p.name) + '</b><small>🏠 ' + p.finished + '/4 · ⚔ ' + st.captures[seat] + '</small></div>';
+        '<b style="flex:1">' + (p.type === 'cpu' ? '🤖 ' : '') + esc(p.name) + '</b><small>🏠 ' + p.finished + '/4 · ⚔ ' + st.captures[seat] + (sum.variant === 'timed' ? ' · ' + sum.scores[seat] + ' pts' : '') + '</small></div>';
     }).join('');
     $('res-reward').innerHTML = '<h3 style="margin:0 0 6px;color:var(--gold-2)">Rewards for ' + esc(sum.players.filter(function (p) { return p.seat === owner; })[0].name) + '</h3>' +
       reward.breakdown.map(function (b) { return '<div class="row"><span class="grow">' + esc(b.label) + '</span><b class="tx-amount">+' + b.coins + ' 🪙</b></div>'; }).join('') +
@@ -597,7 +742,7 @@
       return;
     }
     $('history-body').innerHTML = h.map(function (g) {
-      return '<div class="card"><div class="row" style="padding-top:0"><div class="grow"><b>' + esc(MODE_LABEL[g.mode] || g.mode) + '</b><small>' + fmtDate(g.t) + ' · ' + fmtDur(g.durationMs) + ' · ' + g.turns + ' turns</small></div>' +
+      return '<div class="card"><div class="row" style="padding-top:0"><div class="grow"><b>' + esc(MODE_LABEL[g.mode] || g.mode) + (g.variant && VARIANTS[g.variant] && g.variant !== 'classic' ? ' \u00B7 ' + VARIANTS[g.variant].label : '') + '</b><small>' + fmtDate(g.t) + ' · ' + fmtDur(g.durationMs) + ' · ' + g.turns + ' turns</small></div>' +
         '<span class="badge ' + (g.ownerWon ? 'win' : 'loss') + '">' + (g.ownerWon ? 'WIN' : 'LOSS') + '</span></div>' +
         '<div class="note">🏆 ' + esc(g.winnerName) + ' &nbsp;·&nbsp; ' + g.players.map(function (p) { return '<span style="color:' + COLOR_HEX[p.seat] + '">●</span> ' + esc(p.name) + ' ' + p.finished + '/4'; }).join(' &nbsp; ') +
         '</div><div class="note">+' + (g.coins || 0) + ' 🪙</div></div>';
@@ -659,11 +804,9 @@
 
   // ------------------------------------------------------------ event wiring
   function wire() {
-    window.addEventListener('resize', sizeDice);
-    if (window.ResizeObserver) new ResizeObserver(sizeDice).observe($('board'));
     document.addEventListener('click', function (e) {
       var t = e.target;
-      if (t.closest('button, .pick, .switch, .swatch, .mode-card, .tile') && !t.closest('#btn-roll') && !t.closest('#dice-spot') && !t.closest('.token')) A.play('click');
+      if (t.closest('button, .pick, .switch, .swatch, .variant, .big-tile, .small-tile, .count-card, .color-card, .tok-card, .bottom-nav button') && !t.closest('.hold-box') && !t.closest('.token')) A.play('click');
     }, true);
 
     document.addEventListener('click', function (e) {
@@ -674,7 +817,6 @@
       if (mode) { openSetup(mode.getAttribute('data-mode')); }
     });
 
-    $('btn-play').onclick = function () { go('modes'); };
     $('btn-continue').onclick = function () {
       var g = D.getSavedGame();
       if (g) launch(null, g);
@@ -685,8 +827,41 @@
       applySetting({ sound: !settings.sound, music: !settings.sound });
       $('btn-snd').textContent = settings.sound ? '🔊' : '🔇';
     };
-    $('btn-roll').onclick = function () { if (ctrl) ctrl.requestRoll(); };
-    $('dice-spot').onclick = function () { if (ctrl) ctrl.requestRoll(); };
+    $('btn-back').onclick = openPause;
+    $('btn-quit').onclick = function () {
+      if (!ctrl || current !== 'game') return;
+      ctrl.pause();
+      confirmBox('Quit game?', 'Your progress in this game will be lost.', 'Quit', true).then(function (ok) {
+        if (ok) { ctrl.destroy(); D.clearSavedGame(); A.stopMusic(); goRoot('home'); } else { ctrl.unpause(); }
+      });
+    };
+    document.addEventListener('click', function (e) {
+      var kind = e.target.closest('[data-kind]');
+      if (kind) { openKind(kind.getAttribute('data-kind')); return; }
+      var hb = e.target.closest('#screen-game .hold-box');
+      if (hb && ctrl && Number(hb.getAttribute('data-seat')) === ctrl.state.current) ctrl.requestRoll();
+    });
+    $('variant-list').addEventListener('click', function (e) {
+      var info = e.target.closest('[data-info]');
+      if (info) {
+        var v = VARIANTS[info.getAttribute('data-info')];
+        var m = openModal('<h3>' + v.icon + ' ' + esc(v.label) + '</h3><p>' + esc(v.info) + '</p><button class="btn btn-gold btn-lg" data-x="1">OK</button>');
+        m.onclick = function (ev) { if (ev.target.closest('[data-x]')) closeModal(); };
+        return;
+      }
+      var b = e.target.closest('[data-variant]');
+      if (b && setup) { setup.variant = b.getAttribute('data-variant'); renderModes(); }
+    });
+    $('btn-variant-play').onclick = function () { if (setup) go('setup'); };
+    $('tok-grid').addEventListener('click', function (e) {
+      var t = e.target.closest('[data-tok]');
+      if (t) { tokenPreview = t.getAttribute('data-tok'); renderTokens(); }
+    });
+    $('btn-equip').onclick = function () {
+      applySetting({ tokenStyle: tokenPreview });
+      renderTokens();
+      toast('Token style equipped', 1300);
+    };
     $('spell-bar').addEventListener('click', function (e) {
       var b = e.target.closest('[data-spell]');
       if (b && !b.disabled) onSpellButton(b.getAttribute('data-spell'));
@@ -709,20 +884,12 @@
     // setup interactions
     $('setup-body').addEventListener('click', function (e) {
       var t;
-      if ((t = e.target.closest('[data-hs]'))) { setup.humanSeat = Number(t.getAttribute('data-hs')); renderSetup(); }
-      else if ((t = e.target.closest('[data-opp]'))) { setup.opp = Number(t.getAttribute('data-opp')); renderSetup(); }
+      if ((t = e.target.closest('[data-n]'))) { autoAssign(Number(t.getAttribute('data-n'))); renderSetup(); }
+      else if ((t = e.target.closest('[data-seat]'))) { cycleRole(Number(t.getAttribute('data-seat'))); renderSetup(); }
       else if ((t = e.target.closest('[data-diff]'))) { setup.diff = t.getAttribute('data-diff'); renderSetup(); }
-      else if (e.target.closest('[data-magic]')) { setup.magic = !setup.magic; renderSetup(); }
-      else if ((t = e.target.closest('[data-tog]'))) {
-        var s = Number(t.getAttribute('data-tog'));
-        setup.seats[s].on = !setup.seats[s].on;
-        renderSetup();
-      }
     });
     $('setup-body').addEventListener('input', function (e) {
-      var t = e.target;
-      if (t.id === 'cpu-name') setup.seats[0].name = t.value;
-      else if (t.hasAttribute('data-name')) setup.seats[Number(t.getAttribute('data-name'))].name = t.value;
+      if (e.target.id === 'cpu-name') setup.name = e.target.value;
     });
 
     // settings interactions

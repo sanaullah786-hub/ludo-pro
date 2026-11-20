@@ -155,17 +155,89 @@
     document.body.appendChild(svg);
   }
 
-  function pawnSvg(name) {
-    var stroke = PALETTE[name][2];
-    return '<svg viewBox="0 0 40 52" xmlns="' + NS + '">' +
-      '<ellipse cx="20" cy="48" rx="15" ry="4" fill="rgba(0,0,0,.35)"/>' +
-      '<path d="M6 46 C6 38 13 34 16.5 30 C12.5 28 11.5 24 14 21 L26 21 C28.5 24 27.5 28 23.5 30 C27 34 34 38 34 46 Z" ' +
-      'fill="url(#tok-' + name + ')" stroke="' + stroke + '" stroke-width="1.4" stroke-linejoin="round"/>' +
-      '<circle cx="20" cy="13.5" r="9" fill="url(#tok-' + name + ')" stroke="' + stroke + '" stroke-width="1.4"/>' +
-      '<ellipse cx="16.8" cy="10.2" rx="3.6" ry="2.4" fill="#fff" opacity=".55"/>' +
-      '<ellipse cx="13" cy="39" rx="2.2" ry="4.5" fill="#fff" opacity=".28" transform="rotate(18 13 39)"/>' +
-      '</svg>';
+  // ---------------------------------------------------------------- token styles
+  // Every style is drawn in a 40x52 box that rests on y=48, in the colour of its seat.
+  var TOKEN_STYLES = [
+    { id: 'pointy', label: 'Pointy' }, { id: 'chess', label: 'Chess' }, { id: 'coin', label: 'Coin' },
+    { id: 'cone', label: 'Cone' }, { id: 'gem', label: 'Gem' }, { id: 'mushroom', label: 'Mushroom' },
+    { id: 'ghost', label: 'Ghost' }, { id: 'bulb', label: 'Bulb' }, { id: 'crown', label: 'Crown' },
+    { id: 'star', label: 'Star' }, { id: 'heart', label: 'Heart' }, { id: 'rocket', label: 'Rocket' }
+  ];
+  var DEFAULT_TOKEN_STYLE = 'pointy';
+
+  function starPoints(cx, cy, ro, ri) {
+    var pts = [];
+    for (var i = 0; i < 10; i++) {
+      var a = -Math.PI / 2 + i * Math.PI / 5, r = i % 2 ? ri : ro;
+      pts.push((cx + r * Math.cos(a)).toFixed(1) + ',' + (cy + r * Math.sin(a)).toFixed(1));
+    }
+    return pts.join(' ');
   }
+
+  function tokenSvg(style, name) {
+    var f = 'url(#tok-' + name + ')', k = PALETTE[name][2];
+    var st = 'fill="' + f + '" stroke="' + k + '" stroke-width="1.4" stroke-linejoin="round"';
+    var shadow = '<ellipse cx="20" cy="48" rx="14" ry="3.6" fill="rgba(0,0,0,.35)"/>';
+    var gloss = function (x, y, rx, ry, rot) {
+      return '<ellipse cx="' + x + '" cy="' + y + '" rx="' + rx + '" ry="' + ry + '" fill="#fff" opacity=".5"' + (rot ? ' transform="rotate(' + rot + ' ' + x + ' ' + y + ')"' : '') + '/>';
+    };
+    var body;
+    switch (style) {
+      case 'chess':
+        body = '<path d="M6 46 C6 38 13 34 16.5 30 C12.5 28 11.5 24 14 21 L26 21 C28.5 24 27.5 28 23.5 30 C27 34 34 38 34 46 Z" ' + st + '/>' +
+               '<circle cx="20" cy="13.5" r="9" ' + st + '/>' + gloss(16.8, 10.2, 3.6, 2.4) + gloss(13, 39, 2.2, 4.5, 18);
+        break;
+      case 'coin':
+        body = '<ellipse cx="20" cy="45" rx="15" ry="4" fill="' + k + '"/><circle cx="20" cy="29" r="16" ' + st + '/>' +
+               '<circle cx="20" cy="29" r="10.5" fill="#fff" opacity=".92"/><circle cx="20" cy="29" r="6" ' + st + '/>' + gloss(13, 20, 5, 2.6, -30);
+        break;
+      case 'cone':
+        body = '<path d="M20 5 L34 46 L6 46 Z" ' + st + '/><path d="M15.5 18 L24.5 18 L26.4 25 L13.6 25 Z" fill="#fff" opacity=".9"/>' +
+               '<path d="M11.4 33 L28.6 33 L30.5 40 L9.5 40 Z" fill="#fff" opacity=".9"/>' + gloss(16, 28, 1.6, 8, 12);
+        break;
+      case 'gem':
+        body = '<path d="M20 5 L35 20 L20 47 L5 20 Z" ' + st + '/><path d="M5 20 L35 20 M13 20 L20 5 L27 20 L20 47 Z" fill="none" stroke="#fff" stroke-opacity=".55" stroke-width="1.1"/>' +
+               '<path d="M13 20 L20 5 L27 20 Z" fill="#fff" opacity=".28"/>';
+        break;
+      case 'mushroom':
+        body = '<path d="M14 30 H26 L27 46 H13 Z" fill="#fff3d6" stroke="' + k + '" stroke-width="1.4" stroke-linejoin="round"/>' +
+               '<path d="M3 31 C3 15 11 7 20 7 C29 7 37 15 37 31 Z" ' + st + '/><circle cx="13" cy="20" r="3.4" fill="#fff" opacity=".9"/>' +
+               '<circle cx="26" cy="15" r="3" fill="#fff" opacity=".9"/><circle cx="29" cy="26" r="2.4" fill="#fff" opacity=".9"/>';
+        break;
+      case 'ghost':
+        body = '<path d="M6 46 V23 C6 12 12 6 20 6 C28 6 34 12 34 23 V46 L29 41.5 L24.5 46 L20 41.5 L15.5 46 L11 41.5 Z" ' + st + '/>' +
+               '<circle cx="14.5" cy="22" r="4" fill="#fff"/><circle cx="25.5" cy="22" r="4" fill="#fff"/>' +
+               '<circle cx="15.5" cy="23" r="2" fill="#16203a"/><circle cx="26.5" cy="23" r="2" fill="#16203a"/>' + gloss(13, 12, 3.4, 2, -20);
+        break;
+      case 'bulb':
+        body = '<rect x="14" y="34" width="12" height="11" rx="3" fill="#c9d1e6" stroke="' + k + '" stroke-width="1.3"/>' +
+               '<path d="M14 36 H26 M14 40 H26" stroke="' + k + '" stroke-width="1" opacity=".6"/>' +
+               '<path d="M20 5 C11 5 6 12 6 19.5 C6 26 10 29 13 34 H27 C30 29 34 26 34 19.5 C34 12 29 5 20 5 Z" ' + st + '/>' + gloss(14, 14, 3.8, 2.6, -25);
+        break;
+      case 'crown':
+        body = '<path d="M5 44 L7 17 L15 27 L20 10 L25 27 L33 17 L35 44 Z" ' + st + '/><rect x="5" y="40" width="30" height="6" rx="2" fill="' + k + '" opacity=".55"/>' +
+               '<circle cx="7" cy="15" r="2.6" fill="#fff"/><circle cx="20" cy="8" r="2.6" fill="#fff"/><circle cx="33" cy="15" r="2.6" fill="#fff"/>';
+        break;
+      case 'star':
+        body = '<polygon points="' + starPoints(20, 28, 19, 8.6) + '" ' + st + '/>' + gloss(15, 21, 3.4, 2, -30);
+        break;
+      case 'heart':
+        body = '<path d="M20 46 C3 34 3 15 13 12.5 C17.5 11.4 20 15 20 17.5 C20 15 22.5 11.4 27 12.5 C37 15 37 34 20 46 Z" ' + st + '/>' + gloss(12.5, 19, 3.6, 2.2, -35);
+        break;
+      case 'rocket':
+        body = '<path d="M20 4 C29 12 29 30 27 41 H13 C11 30 11 12 20 4 Z" ' + st + '/>' +
+               '<path d="M13 30 L5 41 L13 39 Z M27 30 L35 41 L27 39 Z" ' + st + '/>' +
+               '<circle cx="20" cy="19" r="4.6" fill="#fff" opacity=".95" stroke="' + k + '" stroke-width="1"/>' +
+               '<path d="M16 41 L20 49 L24 41 Z" fill="#ffd23c" stroke="#e06b00" stroke-width="1"/>';
+        break;
+      default: // pointy: a map pin
+        body = '<path d="M20 49 C20 49 6.5 33 6.5 21 A13.5 13.5 0 1 1 33.5 21 C33.5 33 20 49 20 49 Z" ' + st + '/>' +
+               '<circle cx="20" cy="21" r="6.4" fill="#fff" opacity=".95" stroke="' + k + '" stroke-width="1"/>' + gloss(14.5, 14, 3.4, 2.2, -30);
+    }
+    return '<svg viewBox="0 0 40 52" xmlns="' + NS + '">' + (style === 'pointy' ? '' : shadow) + body + '</svg>';
+  }
+
+  function pawnSvg(name, style) { return tokenSvg(style || DEFAULT_TOKEN_STYLE, name); }
 
   /**
    * BoardView(container)
@@ -183,6 +255,7 @@
     this.tokens = {};
     this.board = null;
     this.stepMs = 170;
+    this.tokenStyle = DEFAULT_TOKEN_STYLE;
   }
 
   BoardView.prototype.build = function (state) {
@@ -193,6 +266,7 @@
       if (!n.hasAttribute('data-keep')) self.container.removeChild(n);
     });
     this.tokens = {};
+    this.labels = {};
     var board = el('div', 'ludo-board', this.container);
     this.board = board;
     var active = {};
@@ -206,6 +280,12 @@
       base.style.left = pct(o[0]); base.style.top = pct(o[1]);
       base.style.width = pct(6); base.style.height = pct(6);
       var inner = el('div', 'base-inner', base);
+      if (active[seat]) {
+        var lab = el('div', 'base-label ' + (seat === 0 || seat === 1 ? 'top' : 'bot'), base);
+        lab.innerHTML = '<b></b><em>0%</em>';
+        lab.firstChild.textContent = state.players[seat].name;
+        this.labels[seat] = lab;
+      }
       BASE_SPOTS[seat].forEach(function (sp) {
         var spot = el('div', 'spot spot-' + SEAT_NAMES[seat], board);
         spot.style.left = pct(sp[0] - 0.46); spot.style.top = pct(sp[1] - 0.46);
@@ -249,7 +329,7 @@
     state.seats.forEach(function (s) {
       for (var i = 0; i < 4; i++) {
         var t = el('div', 'token token-' + SEAT_NAMES[s], self.tokenLayer);
-        t.innerHTML = pawnSvg(SEAT_NAMES[s]);
+        t.innerHTML = pawnSvg(SEAT_NAMES[s], self.tokenStyle);
         t.setAttribute('data-seat', s);
         t.setAttribute('data-idx', i);
         t.addEventListener('click', function (ev) {
@@ -264,6 +344,7 @@
     this.setStepMs(this.stepMs);
     this.layout(state);
     this.setShields(state);
+    this.updateLabels(state);
   };
 
   BoardView.prototype.setStepMs = function (ms) {
@@ -305,6 +386,7 @@
         place(t, g.c.x, g.c.y, s2, o[0], o[1]);
       });
     });
+    if (self.updateLabels) self.updateLabels(state);
   };
 
   /** Move a single token to one position (used for cell-by-cell animation). */
@@ -368,11 +450,35 @@
     });
   };
 
+  /** Progress percentage (0-100) of a seat's tokens towards home. */
+  BoardView.prototype.updateLabels = function (state) {
+    var self = this;
+    state.seats.forEach(function (seat) {
+      var lab = self.labels && self.labels[seat];
+      if (!lab) return;
+      var prog = state.tokens[seat].reduce(function (a, p) { return a + Math.max(0, p + 1); }, 0);
+      var pct100 = Math.round(prog / (4 * 57) * 100);
+      lab.lastChild.textContent = pct100 + '%' + (state.rules.killToEnterHome && !(state.kills[seat] > 0) ? ' \uD83D\uDD12' : '');
+    });
+  };
+
+  /** Re-draw every token in another style (live preview / settings). */
+  BoardView.prototype.setTokenStyle = function (style) {
+    var self = this;
+    this.tokenStyle = style || DEFAULT_TOKEN_STYLE;
+    Object.keys(this.tokens).forEach(function (k) {
+      self.tokens[k].innerHTML = pawnSvg(SEAT_NAMES[Number(k.split('-')[0])], self.tokenStyle);
+    });
+  };
+
   BoardView.prototype.clearHop = function () {
     var self = this;
     Object.keys(this.tokens).forEach(function (k) { self.tokens[k].classList.remove('hop'); });
   };
 
   api.BoardView = BoardView;
+  api.TOKEN_STYLES = TOKEN_STYLES;
+  api.DEFAULT_TOKEN_STYLE = DEFAULT_TOKEN_STYLE;
+  api.tokenSvg = function (style, seat) { installGradients(); return tokenSvg(style, SEAT_NAMES[seat]); };
   return api;
 });

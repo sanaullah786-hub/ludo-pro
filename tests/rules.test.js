@@ -349,5 +349,82 @@ test('full AI games finish with magic + kill rule, and spells really get cast', 
   assert.ok(totalSpells > 80, 'spells cast: ' + totalSpells);
 });
 
+
+// ------------------------------------------------------------ variants
+section('Game variants');
+test('unknown variants fall back to classic', () => {
+  assert.strictEqual(game([0, 1], { variant: 'nonsense' }).variant, 'classic');
+  assert.deepStrictEqual(E.VARIANTS, ['classic', 'power', 'quick', 'deathmatch', 'timed']);
+});
+test('Quick: one capture alone does not win, a capture plus one token home does', () => {
+  const s = game([0, 1], { variant: 'quick' });
+  s.kills[0] = 1;
+  assert.ok(!E.variantWon(s, 0));
+  s.tokens[0] = [53, -1, -1, -1];
+  roll(s, 3);
+  const m = E.applyMove(s, 0);
+  assert.ok(m.won && s.winner === 0);
+  assert.strictEqual(E.completeMove(s).finished, true);
+});
+test('Quick: bringing a token home without a capture does not win', () => {
+  const s = game([0, 1], { variant: 'quick' });
+  s.tokens[0] = [53, -1, -1, -1];
+  roll(s, 3);
+  assert.ok(!E.applyMove(s, 0).won);
+});
+test('Deathmatch: the fourth capture wins (move capture)', () => {
+  const s = game([0, 1], { variant: 'deathmatch' });
+  s.kills[0] = E.DEATHMATCH_KILLS - 1;
+  s.tokens[0][0] = 3; s.tokens[1][0] = 43;
+  roll(s, 1);
+  const m = E.applyMove(s, 0);
+  assert.ok(m.won && s.winner === 0);
+});
+test('Deathmatch: a Blast can deliver the winning capture', () => {
+  const s = game([0, 1], { variant: 'deathmatch', magic: true });
+  s.kills[0] = E.DEATHMATCH_KILLS - 1;
+  s.tokens[1][0] = 30;
+  const r = E.useMagic(s, 'blast', { seat: 1, token: 0 });
+  assert.ok(r.ok && r.won);
+  assert.strictEqual(E.completeMove(s).finished, true);
+  assert.strictEqual(s.winner, 0);
+});
+test('Deathmatch / Quick rankings favour captures', () => {
+  const s = game([0, 1, 2], { variant: 'deathmatch' });
+  s.kills = [4, 0, 2, 0]; s.winner = 0;
+  assert.deepStrictEqual(E.finalRankings(s), [0, 2, 1]);
+});
+test('5 Minutes: endByTime crowns the best score and ranks everyone', () => {
+  const s = game([0, 1, 2], { variant: 'timed' });
+  assert.strictEqual(s.timeLimitMs, 300000);
+  s.tokens[1] = [20, 10, -1, -1]; s.kills[2] = 1; s.tokens[2][0] = 30;
+  const before = [0, 1, 2].map(x => E.variantScore(s, x));
+  assert.ok(before[2] > before[1] && before[1] > before[0], JSON.stringify(before));
+  assert.ok(E.endByTime(s).ok);
+  assert.strictEqual(s.status, 'finished');
+  assert.deepStrictEqual(s.rankings, [2, 1, 0]);
+  assert.strictEqual(E.endByTime(s).error, 'game_finished');
+});
+test('variant, clock and saves round-trip', () => {
+  const s = game([0, 1], { variant: 'timed', timeLimitMs: 1000 });
+  s.timeUsedMs = 400;
+  const d = E.deserialize(E.serialize(s));
+  assert.strictEqual(d.variant, 'timed'); assert.strictEqual(d.timeLimitMs, 1000); assert.strictEqual(d.timeUsedMs, 400);
+  const old = JSON.parse(JSON.stringify(s)); delete old.variant; delete old.timeLimitMs; delete old.timeUsedMs;
+  const o = E.deserialize(old);
+  assert.strictEqual(o.variant, 'classic'); assert.strictEqual(o.timeUsedMs, 0);
+});
+test('full AI games finish in every variant', () => {
+  for (const variant of ['classic', 'power', 'quick', 'deathmatch']) {
+    for (let seed = 1; seed <= 10; seed++) {
+      const { state } = playFull([0, 1, 2, 3], ['hard', 'medium', 'easy', 'hard'], 5000 + seed,
+        { variant, magic: variant === 'power', rules: { killToEnterHome: true } });
+      assert.ok(state.winner !== null && state.status === 'finished', variant);
+      if (variant === 'quick') assert.ok(state.kills[state.winner] >= 1);
+      if (variant === 'deathmatch') assert.ok(state.kills[state.winner] >= E.DEATHMATCH_KILLS || state.tokens[state.winner].every(p => p === 56));
+    }
+  }
+});
+
 console.log('\n' + passed + ' passed, ' + failed + ' failed');
 process.exit(failed ? 1 : 0);

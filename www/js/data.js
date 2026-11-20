@@ -16,6 +16,7 @@
     vibration: true,
     autoMove: true,       // play automatically when only one move is possible
     speed: 'normal',      // normal | fast
+    tokenStyle: 'pointy',  // see LudoBoard.TOKEN_STYLES (all unlocked, no ads)
     turnTimer: 10,        // seconds a human has to roll / move (0 = no limit)
     rules: {              // classic Ludo rules, all configurable
       sixToStart: true,

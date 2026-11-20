@@ -108,6 +108,16 @@
    *   rules: {...}, firstSeat: 0
    * }
    */
+  // ------------------------------------------------------------- variants
+  // classic    - first to bring all four tokens home
+  // power      - classic + spells (state.magic)
+  // quick      - first to capture one token AND bring one token home
+  // deathmatch - first to capture DEATHMATCH_KILLS tokens
+  // timed      - highest score when the clock runs out (all tokens home also wins)
+  var VARIANTS = ['classic', 'power', 'quick', 'deathmatch', 'timed'];
+  var DEATHMATCH_KILLS = 4;
+  var TIMED_LIMIT_MS = 5 * 60 * 1000;
+
   function createGame(options) {
     options = options || {};
     var seats = (options.seats || [0, 1, 2, 3]).slice().sort(function (a, b) { return a - b; });
@@ -160,6 +170,10 @@
       lastMove: null,
       kills: [0, 0, 0, 0],
       magic: options.magic ? makeMagic(seats) : null,
+      lost: [0, 0, 0, 0],
+      variant: VARIANTS.indexOf(options.variant) === -1 ? 'classic' : options.variant,
+      timeLimitMs: options.variant === 'timed' ? (options.timeLimitMs > 0 ? options.timeLimitMs : TIMED_LIMIT_MS) : 0,
+      timeUsedMs: 0,
       stats: {
         captures: [0, 0, 0, 0],
         sixes: [0, 0, 0, 0],
@@ -392,7 +406,7 @@
     if (!preview) return fail('illegal_move');
 
     state.tokens[seat][tokenIdx] = preview.to;
-    preview.captures.forEach(function (c) { state.tokens[c.seat][c.token] = BASE; });
+    preview.captures.forEach(function (c) { state.tokens[c.seat][c.token] = BASE; state.lost[c.seat] += 1; });
     state.stats.captures[seat] += preview.captures.length;
     state.stats.moves[seat] += 1;
     var hadKill = state.kills[seat] > 0;
@@ -406,7 +420,7 @@
       (preview.captures.length > 0 && state.rules.extraTurnOnCapture) ||
       (preview.finishes && state.rules.extraTurnOnFinish);
 
-    var won = state.tokens[seat].every(function (p) { return p === FINISH; });
+    var won = variantWon(state, seat);
     if (won) {
       state.winner = seat;
       state.rankings = [seat];
@@ -528,11 +542,18 @@
     }
     var from = state.tokens[target.seat][target.token];
     state.tokens[target.seat][target.token] = BASE;
+    state.lost[target.seat] += 1;
     state.stats.captures[seat] += 1;
     var hadKill = state.kills[seat] > 0;
     state.kills[seat] += 1;
+    var blastWon = variantWon(state, seat);
+    if (blastWon) {                       // e.g. the last capture of a Deathmatch
+      state.winner = seat; state.rankings = [seat];
+      state.pendingWin = true; state.pendingExtra = false;
+      state.status = 'animating';
+    }
     return {
-      ok: true, magic: 'blast', seat: seat,
+      ok: true, magic: 'blast', seat: seat, won: blastWon,
       target: { seat: target.seat, token: target.token, from: from },
       unlockedHome: !hadKill && !!state.rules.killToEnterHome
     };
@@ -547,10 +568,39 @@
     return state.tokens[seat].filter(function (p) { return p === FINISH; }).length;
   }
 
+  /** Does `seat` meet the winning condition of this game's variant? */
+  function variantWon(state, seat) {
+    if (state.tokens[seat].every(function (p) { return p === FINISH; })) return true;
+    if (state.variant === 'quick') return state.kills[seat] >= 1 && finishedCount(state, seat) >= 1;
+    if (state.variant === 'deathmatch') return state.kills[seat] >= DEATHMATCH_KILLS;
+    return false;
+  }
+
+  /** Points used by the 5 Minutes mode (and for tie-breaks elsewhere). */
+  function variantScore(state, seat) {
+    return totalProgress(state, seat) + state.kills[seat] * 60 + finishedCount(state, seat) * 40;
+  }
+
+  /** The clock ran out: the best score wins. */
+  function endByTime(state) {
+    if (state.status === 'finished') return fail('game_finished');
+    var order = state.seats.slice().sort(function (a, b) { return (variantScore(state, b) - variantScore(state, a)) || (a - b); });
+    state.winner = order[0];
+    state.rankings = order;
+    state.status = 'finished';
+    state.rolling = false;
+    state.pendingWin = false; state.pendingExtra = false; state.validMoves = [];
+    return { ok: true, winner: state.winner };
+  }
+
   /** Winner first, then others by finished tokens and board progress. */
   function finalRankings(state) {
     var others = state.seats.filter(function (s) { return s !== state.winner; });
     others.sort(function (a, b) {
+      if (state.variant === 'deathmatch' || state.variant === 'quick' || state.variant === 'timed') {
+        var d = variantScore(state, b) - variantScore(state, a);
+        if (d) return d;
+      }
       return (finishedCount(state, b) - finishedCount(state, a)) ||
              (totalProgress(state, b) - totalProgress(state, a)) || (a - b);
     });
@@ -611,6 +661,10 @@
     if (s.magic === undefined || s.magic === false) s.magic = null;
     if (s.magic && (!Array.isArray(s.magic.charges) || !Array.isArray(s.magic.shields))) s.magic = null;
     s.rules.killToEnterHome = s.rules.killToEnterHome === true;
+    if (!Array.isArray(s.lost) || s.lost.length !== 4) s.lost = [0, 0, 0, 0];
+    if (VARIANTS.indexOf(s.variant) === -1) s.variant = 'classic';
+    if (!(s.timeLimitMs >= 0)) s.timeLimitMs = 0;
+    if (!(s.timeUsedMs >= 0)) s.timeUsedMs = 0;
     if (s.status === 'animating') {
       s.status = 'waiting_roll';
       s.pendingWin = false;
@@ -641,6 +695,8 @@
     applyMove: applyMove, completeMove: completeMove,
     totalProgress: totalProgress, finishedCount: finishedCount,
     finalRankings: finalRankings, isGameOver: isGameOver,
+    VARIANTS: VARIANTS, DEATHMATCH_KILLS: DEATHMATCH_KILLS, TIMED_LIMIT_MS: TIMED_LIMIT_MS,
+    variantWon: variantWon, variantScore: variantScore, endByTime: endByTime,
     simulateMove: simulateMove,
     SPELLS: SPELLS, skipTurn: skipTurn, useMagic: useMagic, magicTargets: magicTargets,
     isShielded: isShielded, isGateLocked: isGateLocked,

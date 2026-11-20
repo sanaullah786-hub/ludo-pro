@@ -14,7 +14,7 @@ const fs = require('fs'), path = require('path'), cp = require('child_process');
 
 const WWW = path.join(__dirname, '..', 'www');
 const REQUIRED = [
-  'index.html', 'css/style.css',
+  'index.html', 'css/style.css', 'css/redesign.css',
   'js/ludo-engine.js', 'js/ludo-ai.js', 'js/ludo-board.js', 'js/game-controller.js',
   'js/storage.js', 'js/data.js', 'js/economy.js', 'js/audio.js', 'js/app.js',
   'assets/images/logo.png', 'assets/images/splash-screen.png', 'assets/images/bg-main.jpg',
