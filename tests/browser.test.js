@@ -33,7 +33,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('console', m => { if (m.type() === 'error' && !/play\(\)|NotAllowed|autoplay/i.test(m.text())) errors.push('console: ' + m.text()); });
-  page.on('requestfailed', r => errors.push('request failed: ' + r.url()));
+  page.on('requestfailed', r => { if (/\.mp3$/.test(r.url()) && /ABORTED/.test((r.failure() || {}).errorText || '')) return; errors.push('request failed: ' + r.url()); });
   page.on('response', r => { if (r.status() >= 400) errors.push('HTTP ' + r.status() + ' ' + r.url()); });
   const shot = async n => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, n + '.png') }); };
   const active = () => page.evaluate(() => document.querySelector('.screen.active').id);
@@ -77,7 +77,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await shot('04-modes');
   ok(await page.locator('#variant-list [data-variant]').count() === 5, 'five game modes: Classic, 5 Minutes, Quick, Deathmatch, Power');
   await page.click('#variant-list [data-info="deathmatch"]');
-  ok(await hasModal(), 'info button explains a mode');
+  ok(await hasModal(), 'info button opens the Rules popup');
+  ok(await page.locator('#modal [data-rt]').count() === 5, 'Rules popup has 5 tabs');
+  ok(await page.locator('#modal .rule-row').count() === 3, 'Deathmatch tab lists its rules');
+  await shot('04b-rules-deathmatch');
+  await page.click('#modal [data-rt="power"]');
+  ok(await page.locator('#modal .rule-row').count() >= 8, 'Power tab lists the power-ups');
+  await shot('04c-rules-power');
   await page.click('#modal [data-x]');
   await page.click('#btn-variant-play');
   ok(await active() === 'screen-setup', 'PLAY opens the player/colour select');
@@ -264,12 +270,36 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   await page.waitForFunction(() => window.LudoApp.controller.awaitingRoll, null, { timeout: 8000 });
   ok(await page.isVisible('#spell-bar'), 'Power shows the spell bar');
   ok(await page.locator('#spell-bar .spell:not([disabled])').count() === 3, 'all three spells are ready');
+  ok(await page.locator('.pad').count() === 9, 'Power board shows 9 power-up pads');
+  ok(await page.locator('.pad[data-pad="mine"]').count() === 1, 'one hidden landmine is on the board');
   await shot('24-power');
   await page.click('[data-spell="dice"]');
   ok(await page.locator('#modal [data-n="6"]').count() === 1, 'Pick Dice offers 1-6');
   await page.click('#modal [data-n="6"]');
   await page.waitForFunction(() => window.LudoApp.controller.state.dice === 6, null, { timeout: 5000 });
   ok(true, 'Pick Dice rolled exactly the chosen number');
+  await quitCurrent();
+
+  // rocket pad through the real UI
+  await startGame('power', null, 2, 'easy');
+  await page.waitForFunction(() => window.LudoApp.controller.awaitingRoll, null, { timeout: 8000 });
+  const exp = await page.evaluate(() => {
+    const c = window.LudoApp.controller, s = c.state, seat = s.current;
+    const pad = s.pads.find(p => p.type === 'rocket'); pad.cell = 20;
+    s.pads.forEach(p => { if (p !== pad && Math.abs(p.cell - 20) < 4) p.cell = 40 + s.pads.indexOf(p) % 3; });
+    const rel = (20 - window.LudoEngine.START_INDEX[seat] + 52) % 52;
+    s.tokens[seat] = [rel - 2, -1, -1, -1];
+    c.view.setPads(s); c.view.layout(s);
+    c.rng = () => 0.2;                                   // roll a 2
+    return { seat, to: rel + 8 };
+  });
+  await page.click('.hold-box[data-seat="' + exp.seat + '"]', { force: true });
+  await page.waitForFunction(() => window.LudoApp.controller.awaitingMove || window.LudoApp.controller.state.status === 'animating', null, { timeout: 6000 }).catch(() => {});
+  await page.evaluate(() => { const c = window.LudoApp.controller; if (c.awaitingMove) c.tapToken && c.tapToken(c.state.current, 0); });
+  await page.waitForFunction(e => window.LudoApp.controller.state.tokens[e.seat][0] === e.to, exp, { timeout: 8000 });
+  ok(true, 'token landing on a Rocket pad flies 8 steps further');
+  await shot('24b-rocket');
+  await page.evaluate(() => { window.LudoApp.controller.rng = Math.random; });
   await quitCurrent();
 
   // settings

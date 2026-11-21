@@ -203,3 +203,35 @@
   .round-btn { width: 46px; height: 46px; font-size: 22px; }
   #board { width: min(calc(100vw - 12px), calc(100vh - 296px - var(--safe-t) - var(--safe-b))); }
 }
+
+/* ------------------------------------------------------------ power-up pads */
+.pad-layer { position: absolute; inset: 0; pointer-events: none; }
+.pad { position: absolute; display: grid; place-items: center; box-sizing: border-box; border-radius: 22%;
+  border: 2px solid rgba(255, 255, 255, .85); box-shadow: 0 1px 3px rgba(0, 0, 0, .45), inset 0 0 6px rgba(255, 255, 255, .35); }
+.pad span { font-size: 62%; line-height: 1; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .7); }
+#board .pad span { font-size: calc(min(100vw - 12px, 100vh - 330px) / 15 * .55); }
+.pad-rocket { background: linear-gradient(#ff7a59, #d6342a); }
+.pad-spring { background: linear-gradient(#ffd34d, #e08a00); }
+.pad-x2 { background: linear-gradient(#52b8ff, #1f5fd1); }
+.pad-x3 { background: linear-gradient(#b86bff, #6a2bd1); }
+.pad-shield { background: linear-gradient(#5fe0ff, #1c90c8); }
+.pad-tnt { background: linear-gradient(#ff5959, #8f0f0f); }
+.pad-mine { background: linear-gradient(#6a7280, #2d323c); opacity: .85; }
+.pad-ice { background: linear-gradient(#bdf3ff, #52b4dc); }
+.pad-fire { background: linear-gradient(#ffb02e, #e0300d); }
+.pad.fired { animation: padFire .9s ease-out; z-index: 5; }
+@keyframes padFire { 0% { transform: scale(1); } 30% { transform: scale(1.9); box-shadow: 0 0 18px 8px rgba(255, 255, 255, .9); } 100% { transform: scale(1); } }
+.token.frozen svg { filter: drop-shadow(0 0 4px #9fe8ff) drop-shadow(0 0 8px #5fd0ff) saturate(.6) brightness(1.15); }
+.token.frozen::before { content: '\1F9CA'; position: absolute; right: -14%; top: -6%; font-size: 12px; }
+
+/* ------------------------------------------------------------------ rules popup */
+.rules { width: 100%; }
+.rules-title { margin: 0 0 8px; text-align: center; font-size: 24px; letter-spacing: 2px; color: #ffc93d; text-shadow: 0 2px 0 rgba(0, 0, 0, .4); }
+.rules-tabs { display: flex; gap: 2px; padding: 4px; margin-bottom: 10px; border-radius: 22px; background: rgba(8, 14, 60, .8); overflow-x: auto; scrollbar-width: none; }
+.rules-tabs button { flex: 1 1 auto; padding: 8px 5px; border-radius: 18px; font-size: 12px; font-weight: 700; color: #fff; white-space: nowrap; }
+.rules-tabs button.sel { background: linear-gradient(#a8b0cf, #626a92); box-shadow: 0 2px 6px rgba(0, 0, 0, .4); }
+.rules-list { display: flex; flex-direction: column; gap: 8px; max-height: min(52vh, 360px); overflow-y: auto; margin-bottom: 12px; padding-right: 2px; }
+.rule-row { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 14px; text-align: left;
+  background: linear-gradient(rgba(36, 48, 130, .9), rgba(22, 30, 96, .95)); border: 1px solid rgba(120, 140, 230, .3); }
+.rule-ico { flex: none; width: 54px; height: 46px; display: grid; place-items: center; border-radius: 10px; font-size: 26px; font-weight: 800; color: #fff; background: rgba(6, 10, 40, .8); }
+.rule-row p { margin: 0; font-size: 15px; font-weight: 700; color: #fff; line-height: 1.25; }

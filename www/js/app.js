@@ -575,6 +575,64 @@
     });
   }
 
+  // ---------------------------------------------------------------- rules popup
+  var RULE_TABS = [['classic', 'Classic'], ['timed', '5 Min'], ['quick', 'Quick'], ['deathmatch', 'Deathmatch'], ['power', 'Power']];
+  var RULES = {
+    classic: [
+      ['🎲', 'Roll a 6 to take a token out of the base'],
+      ['⭐', 'Tokens are safe on star and start squares'],
+      ['🔓', 'Capture one token to open your home lane (can be changed in Settings)'],
+      ['🏠', 'Bring all four tokens home to win']
+    ],
+    timed: [
+      ['⏱', 'You have 5:00 - the player with the highest score wins'],
+      ['👣', '+1 point for every step a token has travelled'],
+      ['💥', '+60 points for capturing a token'],
+      ['🏠', '+40 points for every token that reaches home']
+    ],
+    quick: [
+      ['🔒', 'The home path is blocked at the start'],
+      ['💥', 'Capture a token to unlock it'],
+      ['🏠', 'Bring one token home after a capture to win the game']
+    ],
+    deathmatch: [
+      ['⚔️', 'The first player to capture 4 tokens wins'],
+      ['💀', 'A captured token goes back to its base'],
+      ['📊', 'When the game ends, captures decide the ranking']
+    ],
+    power: [
+      ['🚀', 'Rocket flies your token 8 steps forward'],
+      ['⏫', 'Spring bounces your token 4 steps forward'],
+      ['×2', 'x2 doubles the roll that landed you there (x3 triples it)'],
+      ['🛡️', 'Shield protects your token until your next turn'],
+      ['🧨', 'TNT blasts every unprotected token on and next to it - even yours'],
+      ['❔', 'Hidden Landmine sends the first token that lands on it home'],
+      ['🧊', 'Ice freezes your token for its next turn'],
+      ['🔥', 'Fire burns opponent tokens on the 3 squares ahead (counts as a capture)'],
+      ['🎯', 'Spell: Pick Dice - choose your number'],
+      ['💥', 'Spell: Blast - send an opponent token home'],
+      ['✨', 'Finishing a token earns a new spell']
+    ]
+  };
+
+  function openRules(tab) {
+    var cur = RULES[tab] ? tab : 'classic';
+    var m = openModal('<div class="rules"></div>');
+    function render() {
+      m.querySelector('.rules').innerHTML = '<h3 class="rules-title">RULES</h3><div class="rules-tabs">' +
+        RULE_TABS.map(function (t) { return '<button data-rt="' + t[0] + '"' + (t[0] === cur ? ' class="sel"' : '') + '>' + t[1] + '</button>'; }).join('') +
+        '</div><div class="rules-list">' +
+        RULES[cur].map(function (r) { return '<div class="rule-row"><span class="rule-ico">' + r[0] + '</span><p>' + esc(r[1]) + '</p></div>'; }).join('') +
+        '</div><button class="btn btn-gold btn-lg" data-x="1">OK</button>';
+    }
+    render();
+    m.onclick = function (ev) {
+      var t = ev.target.closest('[data-rt]');
+      if (t) { cur = t.getAttribute('data-rt'); render(); return; }
+      if (ev.target.closest('[data-x]')) closeModal();
+    };
+  }
+
   function onEvent(evt) {
     var owner = ctrl && ctrl.meta ? ctrl.meta.ownerSeat : 0;
     if (evt.type === 'capture') {
@@ -584,6 +642,10 @@
       if (evt.seat === owner) Eco.track('six', 1);
     } else if (evt.type === 'homeUnlocked') {
       toast(evt.human ? '🔓 Home lane opened - your tokens can go home!' : '🔓 Home lane opened', 1800);
+    } else if (evt.type === 'pad') {
+      var PT = { rocket: '🚀 Rocket! +8 steps', spring: '⏫ Spring! +4 steps', x2: '×2 Multiplier!', x3: '×3 Multiplier!',
+                 shield: '🛡️ Shield picked up', tnt: '🧨 TNT blast!', mine: '💣 Landmine!', ice: '🧊 Frozen for the next turn', fire: '🔥 Fire burns the way ahead' };
+      toast(PT[evt.type] || 'Power-up!', 1500);
     } else if (evt.type === 'timeout') {
       toast('⏱ Time up!', 1200);
     } else if (evt.type === 'magic') {
@@ -843,12 +905,7 @@
     });
     $('variant-list').addEventListener('click', function (e) {
       var info = e.target.closest('[data-info]');
-      if (info) {
-        var v = VARIANTS[info.getAttribute('data-info')];
-        var m = openModal('<h3>' + v.icon + ' ' + esc(v.label) + '</h3><p>' + esc(v.info) + '</p><button class="btn btn-gold btn-lg" data-x="1">OK</button>');
-        m.onclick = function (ev) { if (ev.target.closest('[data-x]')) closeModal(); };
-        return;
-      }
+      if (info) { openRules(info.getAttribute('data-info')); return; }
       var b = e.target.closest('[data-variant]');
       if (b && setup) { setup.variant = b.getAttribute('data-variant'); renderModes(); }
     });

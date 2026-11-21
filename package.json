@@ -6,7 +6,7 @@
   "license": "UNLICENSED",
   "private": true,
   "scripts": {
-    "test": "node tests/engine.test.js && node tests/rules.test.js && node tests/app.test.js && node tests/timer.test.js",
+    "test": "node tests/engine.test.js && node tests/rules.test.js && node tests/pads.test.js && node tests/app.test.js && node tests/timer.test.js",
     "test:e2e": "node tests/browser.test.js",
     "build": "node scripts/build-web.js",
     "assets": "npx capacitor-assets generate --android",

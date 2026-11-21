@@ -29,6 +29,10 @@
     return state.tokens[seat].filter(function (p) { return p >= 0 && p < E.FINISH; }).length;
   }
 
+  // Power-up pads the computer can see (the landmine is hidden, so it is ignored).
+  var PAD_VALUE = { rocket: 160, spring: 80, x2: 90, x3: 150, shield: 70, fire: 90, tnt: -260, ice: -140 };
+  function padBonus(p) { return p.padType && PAD_VALUE[p.padType] ? PAD_VALUE[p.padType] : 0; }
+
   // ----------------------------------------------------------------- medium
 
   function scoreMedium(state, idx, rng) {
@@ -40,6 +44,7 @@
     if (p.entersHomeLane) score += 150;
     if (p.entersFromBase) score += 300;
     score += p.to * 3;              // prefer the token closest to home
+    score += padBonus(p);
     score += noise(rng, 4);
     return score;
   }
@@ -58,6 +63,7 @@
     if (allHome) return 1e6;
 
     if (p.finishes) score += 800;
+    score += padBonus(p) * 1.5;
 
     // Captures: more valuable the further the victim had travelled.
     p.captures.forEach(function (c) {

@@ -170,6 +170,8 @@
       lastMove: null,
       kills: [0, 0, 0, 0],
       magic: options.magic ? makeMagic(seats) : null,
+      pads: (options.variant === 'power' && options.pads !== false) ? makePads(options.padSeed) : [],
+      frozen: [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]],
       lost: [0, 0, 0, 0],
       variant: VARIANTS.indexOf(options.variant) === -1 ? 'classic' : options.variant,
       timeLimitMs: options.variant === 'timed' ? (options.timeLimitMs > 0 ? options.timeLimitMs : TIMED_LIMIT_MS) : 0,
@@ -182,6 +184,106 @@
         homeTokens: [0, 0, 0, 0]
       }
     };
+  }
+
+  // ------------------------------------------------------ board power-ups
+  // Power variant only. Each pad sits on an ordinary (non-safe) track cell.
+  //  rocket +8 steps, spring +4 steps, x2 / x3 multiply the roll that landed there,
+  //  shield protects the token until its owner's next turn, tnt blasts every unprotected
+  //  token on the pad and the two neighbouring cells, mine (hidden) sends the first token
+  //  that lands on it home and disappears, ice freezes the token for its next turn,
+  //  fire burns opponent tokens on the next three cells.
+  var PAD_TYPES = ['rocket', 'spring', 'x2', 'x3', 'shield', 'tnt', 'mine', 'ice', 'fire'];
+  var PAD_STEPS = { rocket: 8, spring: 4 };
+
+  function makePads(seed) {
+    var rng = mulberry32(seed === undefined ? Math.floor(Math.random() * 4294967296) : seed);
+    var cells = [], c;
+    for (c = 0; c < TRACK_LENGTH; c++) if (!SAFE_SET[c]) cells.push(c);
+    for (var i = cells.length - 1; i > 0; i--) {
+      var j = Math.floor(rng() * (i + 1)), t = cells[i]; cells[i] = cells[j]; cells[j] = t;
+    }
+    var pads = [];
+    PAD_TYPES.forEach(function (type) {
+      for (var k = 0; k < cells.length; k++) {
+        var cell = cells[k];
+        var near = pads.some(function (p) {
+          var d = Math.abs(p.cell - cell); return Math.min(d, TRACK_LENGTH - d) < 3;
+        });
+        if (!near) { pads.push({ type: type, cell: cell, hidden: type === 'mine' }); cells.splice(k, 1); break; }
+      }
+    });
+    return pads;
+  }
+
+  function padAtCell(state, cell) {
+    var pads = state.pads || [];
+    for (var i = 0; i < pads.length; i++) if (pads[i].cell === cell) return pads[i];
+    return null;
+  }
+
+  function sendHome(state, seat, token) {
+    state.tokens[seat][token] = BASE;
+    if (state.frozen) state.frozen[seat][token] = 0;
+    if (state.magic && state.magic.shields[seat]) state.magic.shields[seat][token] = false;
+  }
+
+  /** Unprotected opponent/own tokens on the given absolute cells. */
+  function tokensOnCells(state, cells, exceptSeat) {
+    var out = [];
+    state.seats.forEach(function (s) {
+      for (var t = 0; t < TOKENS_PER_PLAYER; t++) {
+        var p = state.tokens[s][t];
+        if (!isOnTrack(p) || (exceptSeat !== undefined && s === exceptSeat)) continue;
+        var cell = trackCell(s, p);
+        if (cells.indexOf(cell) !== -1 && !isSafeCell(cell, state.rules) && !isShielded(state, s, t)) out.push({ seat: s, token: t, from: p, cell: cell });
+      }
+    });
+    return out;
+  }
+
+  /** Apply the effect of the pad under a token that has just landed. Mutates state. */
+  function resolvePad(state, seat, idx, value) {
+    var to = state.tokens[seat][idx];
+    if (!state.pads || !state.pads.length || !isOnTrack(to)) return null;
+    var cell = trackCell(seat, to), pad = padAtCell(state, cell);
+    if (!pad) return null;
+    var d = { type: pad.type, cell: cell, seat: seat, token: idx, from: to, to: to, path: [], sent: [],
+              captures: [], finishes: false, removed: false, frozen: false, shielded: false };
+    var n = 0;
+    if (pad.type === 'rocket' || pad.type === 'spring') n = PAD_STEPS[pad.type];
+    else if (pad.type === 'x2') n = value;
+    else if (pad.type === 'x3') n = value * 2;
+    if (n > 0) {
+      var t2 = bonusTarget(state, seat, to, n);
+      if (t2 !== null) {
+        d.path = pathBetween(to, t2); d.to = t2;
+        state.tokens[seat][idx] = t2;
+        d.captures = capturesAt(state, seat, t2);
+        d.captures.forEach(function (c) { sendHome(state, c.seat, c.token); state.lost[c.seat] += 1; });
+        if (t2 === FINISH) d.finishes = true;
+      }
+    } else if (pad.type === 'shield') {
+      if (state.magic) { state.magic.shields[seat][idx] = true; d.shielded = true; }
+    } else if (pad.type === 'tnt') {
+      var around = [(cell + TRACK_LENGTH - 1) % TRACK_LENGTH, cell, (cell + 1) % TRACK_LENGTH];
+      d.sent = tokensOnCells(state, around);
+      d.sent.forEach(function (c) { sendHome(state, c.seat, c.token); state.lost[c.seat] += 1; });
+    } else if (pad.type === 'mine') {
+      state.pads.splice(state.pads.indexOf(pad), 1);
+      d.removed = true;
+      if (!isShielded(state, seat, idx)) {
+        d.sent = [{ seat: seat, token: idx, from: to, cell: cell }];
+        sendHome(state, seat, idx); state.lost[seat] += 1;
+      }
+    } else if (pad.type === 'ice') {
+      state.frozen[seat][idx] = 2; d.frozen = true;
+    } else if (pad.type === 'fire') {
+      var ahead = [(cell + 1) % TRACK_LENGTH, (cell + 2) % TRACK_LENGTH, (cell + 3) % TRACK_LENGTH];
+      d.captures = tokensOnCells(state, ahead, seat);
+      d.captures.forEach(function (c) { sendHome(state, c.seat, c.token); state.lost[c.seat] += 1; });
+    }
+    return d;
   }
 
   function makeMagic(seats) {
@@ -212,6 +314,9 @@
     state.consecutiveSixes = 0;
     state.validMoves = [];
     state.pendingExtra = false;
+    if (state.frozen && state.frozen[state.current]) {
+      state.frozen[state.current] = state.frozen[state.current].map(function (f) { return f > 0 ? f - 1 : 0; });
+    }
     state.current = nextSeat(state);
     if (state.magic) state.magic.shields[state.current] = [false, false, false, false];
     state.status = 'waiting_roll';
@@ -228,6 +333,11 @@
       if (state.rules.sixToStart) return value === 6 ? 0 : null;
       return 0;
     }
+    return stepTarget(state, seat, pos, value);
+  }
+
+  /** Target for a token already on the board moving `value` steps, or null. */
+  function stepTarget(state, seat, pos, value) {
     var target = pos + value;
     // Gate closed: instead of turning into the home lane the token keeps
     // circling the board (second lap) until its owner has made a capture.
@@ -236,7 +346,26 @@
     return target;
   }
 
+  /** Largest legal bonus advance of at most n steps (null if none). */
+  function bonusTarget(state, seat, pos, n) {
+    for (var k = n; k >= 1; k--) {
+      var t = stepTarget(state, seat, pos, k);
+      if (t !== null && t !== pos) return t;
+    }
+    return null;
+  }
+
+  function pathBetween(from, to) {
+    var path = [];
+    if (to < from) {
+      for (var p1 = from + 1; p1 <= LAST_TRACK_REL; p1++) path.push(p1);
+      for (var p2 = 0; p2 <= to; p2++) path.push(p2);
+    } else for (var p = from + 1; p <= to; p++) path.push(p);
+    return path;
+  }
+
   function canMove(state, seat, tokenIdx, value) {
+    if (state.frozen && state.frozen[seat] && state.frozen[seat][tokenIdx] > 0 && state.tokens[seat][tokenIdx] !== BASE) return false;
     return targetPosition(state, seat, tokenIdx, value) !== null;
   }
 
@@ -312,6 +441,10 @@
       entersHomeLane: !isInHomeLane(from) && isInHomeLane(to),
       finishes: to === FINISH,
       landsSafe: landsSafe,
+      padType: (function () {
+        var pd = isOnTrack(to) ? padAtCell(state, trackCell(seat, to)) : null;
+        return pd ? pd.type : null;
+      })(),
       fromSafe: from === BASE ? true : isProtectedPos(seat, from, state.rules)
     };
   }
@@ -406,19 +539,30 @@
     if (!preview) return fail('illegal_move');
 
     state.tokens[seat][tokenIdx] = preview.to;
-    preview.captures.forEach(function (c) { state.tokens[c.seat][c.token] = BASE; state.lost[c.seat] += 1; });
+    preview.captures.forEach(function (c) { sendHome(state, c.seat, c.token); state.lost[c.seat] += 1; });
     state.stats.captures[seat] += preview.captures.length;
     state.stats.moves[seat] += 1;
     var hadKill = state.kills[seat] > 0;
     state.kills[seat] += preview.captures.length;
-    var unlockedHome = !hadKill && state.kills[seat] > 0 && !!state.rules.killToEnterHome;
     var earned = null;
     if (preview.finishes) { state.stats.homeTokens[seat] += 1; earned = earnCharge(state, seat); }
 
+    // power-up under the landing cell
+    var pad = resolvePad(state, seat, tokenIdx, state.dice);
+    var padKills = 0;
+    if (pad) {
+      padKills = pad.captures.length;
+      state.kills[seat] += padKills;
+      state.stats.captures[seat] += padKills;
+      if (pad.finishes) { state.stats.homeTokens[seat] += 1; earned = earned || earnCharge(state, seat); }
+    }
+    var unlockedHome = !hadKill && state.kills[seat] > 0 && !!state.rules.killToEnterHome;
+    var finishedNow = preview.finishes || !!(pad && pad.finishes);
+
     var extra =
       (state.dice === 6 && state.rules.extraTurnOnSix) ||
-      (preview.captures.length > 0 && state.rules.extraTurnOnCapture) ||
-      (preview.finishes && state.rules.extraTurnOnFinish);
+      ((preview.captures.length + padKills) > 0 && state.rules.extraTurnOnCapture) ||
+      (finishedNow && state.rules.extraTurnOnFinish);
 
     var won = variantWon(state, seat);
     if (won) {
@@ -435,6 +579,8 @@
     var result = clone(preview);
     result.ok = true;
     result.unlockedHome = unlockedHome;
+    result.pad = pad;
+    result.finishes = finishedNow;
     result.earnedSpell = earned;
     result.extraTurn = !!extra && !won;
     result.won = won;
@@ -620,6 +766,7 @@
     if (!preview) return null;
     copy.tokens[seat][tokenIdx] = preview.to;
     preview.captures.forEach(function (c) { copy.tokens[c.seat][c.token] = BASE; });
+    resolvePad(copy, seat, tokenIdx, value);
     return { state: copy, preview: preview };
   }
 
@@ -662,6 +809,8 @@
     if (s.magic && (!Array.isArray(s.magic.charges) || !Array.isArray(s.magic.shields))) s.magic = null;
     s.rules.killToEnterHome = s.rules.killToEnterHome === true;
     if (!Array.isArray(s.lost) || s.lost.length !== 4) s.lost = [0, 0, 0, 0];
+    if (!Array.isArray(s.pads)) s.pads = [];
+    if (!Array.isArray(s.frozen) || s.frozen.length !== 4) s.frozen = [[0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0], [0, 0, 0, 0]];
     if (VARIANTS.indexOf(s.variant) === -1) s.variant = 'classic';
     if (!(s.timeLimitMs >= 0)) s.timeLimitMs = 0;
     if (!(s.timeUsedMs >= 0)) s.timeUsedMs = 0;
@@ -697,7 +846,7 @@
     finalRankings: finalRankings, isGameOver: isGameOver,
     VARIANTS: VARIANTS, DEATHMATCH_KILLS: DEATHMATCH_KILLS, TIMED_LIMIT_MS: TIMED_LIMIT_MS,
     variantWon: variantWon, variantScore: variantScore, endByTime: endByTime,
-    simulateMove: simulateMove,
+    simulateMove: simulateMove, PAD_TYPES: PAD_TYPES, PAD_STEPS: PAD_STEPS, makePads: makePads, padAtCell: padAtCell,
     SPELLS: SPELLS, skipTurn: skipTurn, useMagic: useMagic, magicTargets: magicTargets,
     isShielded: isShielded, isGateLocked: isGateLocked,
     serialize: serialize, deserialize: deserialize, isValidState: isValidState,

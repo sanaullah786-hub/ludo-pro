@@ -335,6 +335,7 @@
       this._sfx('capture');
       if (this.view) this.view.sendToBase(args.seat, args.token);
     }
+    if (res.pad) await this._playPad(res.pad, seat, idx);
     if (res.unlockedHome) {
       this._emit('homeUnlocked', { seat: seat, human: s.players[seat].type === 'human' });
       this._say(this._name(seat) + ' opened the home lane!', seat);
@@ -604,6 +605,32 @@
     if (c.finished) { await this._finish(sid); return; }
     if (c.extraTurn) this._say(s.players[seat].name + ' gets another turn!', seat);
     this._save();
+  };
+
+  /** Animate the effect of a power-up pad (state already holds the result). */
+  P._playPad = async function (pd, seat, idx) {
+    var s = this.state, v = this.view, human = s.players[seat].type === 'human';
+    this._sfx('magic');
+    if (v) v.flashPad(pd.cell);
+    this._emit('pad', { seat: seat, type: pd.type, human: human, pad: pd });
+    await this._wait(520);
+    if (pd.path.length) {
+      for (var i = 0; i < pd.path.length; i++) {
+        if (v) v.moveStep(seat, idx, pd.path[i]);
+        await this._wait(Math.max(60, this._stepMs() * 0.7));
+      }
+    }
+    var gone = pd.sent.concat(pd.captures);
+    if (gone.length) {
+      this._sfx('capture');
+      this._vibrate(90);
+      if (v) gone.forEach(function (c) { v.sendToBase(c.seat, c.token); });
+      if (pd.captures.length) {
+        this._emit('capture', { seat: seat, count: pd.captures.length, victims: pd.captures, human: human });
+      }
+      await this._wait(460);
+    }
+    if (v) { v.setPads(s); if (v.setShields) v.setShields(s); if (v.setFrozen) v.setFrozen(s); }
   };
 
   P._finish = async function (sid) {

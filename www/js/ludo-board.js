@@ -322,6 +322,8 @@
       '<circle cx="1.5" cy="1.5" r="0.2" fill="#ffd54a" stroke="#8a5a00" stroke-width="0.04"/>' +
       '</svg>';
 
+    this.padLayer = el('div', 'pad-layer', board);
+    this.setPads(state);
     this.targetLayer = el('div', 'target-layer', board);
     this.tokenLayer = el('div', 'token-layer', board);
 
@@ -387,6 +389,7 @@
       });
     });
     if (self.updateLabels) self.updateLabels(state);
+    if (self.setFrozen) self.setFrozen(state);
   };
 
   /** Move a single token to one position (used for cell-by-cell animation). */
@@ -396,6 +399,44 @@
     var c = coordFor(seat, idx, pos);
     t.classList.add('hop');
     place(t, c.x, c.y, c.kind === 'finish' ? 0.5 : 1, 0, 0);
+  };
+
+  var PAD_ICON = { rocket: '\uD83D\uDE80', spring: '\u23EB', x2: '\u00D72', x3: '\u00D73', shield: '\uD83D\uDEE1\uFE0F',
+                   tnt: '\uD83E\uDDE8', mine: '\u2754', ice: '\uD83E\uDDCA', fire: '\uD83D\uDD25' };
+
+  /** Draw the Power-mode pads on their track cells. */
+  BoardView.prototype.setPads = function (state) {
+    if (!this.padLayer) return;
+    var layer = this.padLayer;
+    layer.innerHTML = '';
+    (state.pads || []).forEach(function (p) {
+      var rc = TRACK[p.cell];
+      if (!rc) return;
+      var d = el('div', 'pad pad-' + p.type, layer);
+      d.style.left = pct(rc[1]); d.style.top = pct(rc[0]);
+      d.style.width = pct(1); d.style.height = pct(1);
+      d.setAttribute('data-pad', p.type); d.setAttribute('data-cell', p.cell);
+      d.innerHTML = '<span>' + (PAD_ICON[p.type] || '?') + '</span>';
+    });
+  };
+
+  /** Pulse the pad that was just triggered. */
+  BoardView.prototype.flashPad = function (cell) {
+    if (!this.padLayer) return;
+    var d = this.padLayer.querySelector('[data-cell="' + cell + '"]');
+    if (!d) return;
+    d.classList.add('fired');
+    setTimeout(function () { d.classList.remove('fired'); }, 900);
+  };
+
+  BoardView.prototype.setFrozen = function (state) {
+    var self = this;
+    state.seats.forEach(function (s) {
+      for (var i = 0; i < 4; i++) {
+        var t = self.tokens[s + '-' + i];
+        if (t) t.classList.toggle('frozen', !!(state.frozen && state.frozen[s][i] > 0 && state.tokens[s][i] >= 0));
+      }
+    });
   };
 
   BoardView.prototype.sendToBase = function (seat, idx) {
