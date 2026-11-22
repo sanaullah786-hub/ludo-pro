@@ -322,10 +322,10 @@
       '<circle cx="1.5" cy="1.5" r="0.2" fill="#ffd54a" stroke="#8a5a00" stroke-width="0.04"/>' +
       '</svg>';
 
-    this.padLayer = el('div', 'pad-layer', board);
+    this.padLayer = el('div', 'pad-layer', this.container);
     this.setPads(state);
-    this.targetLayer = el('div', 'target-layer', board);
-    this.tokenLayer = el('div', 'token-layer', board);
+    this.targetLayer = el('div', 'target-layer', this.container);
+    this.tokenLayer = el('div', 'token-layer', this.container);
 
     // Tokens
     state.seats.forEach(function (s) {

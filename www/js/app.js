@@ -331,7 +331,9 @@
   }
   function holderEl(seat) { return document.querySelector('#screen-game .holder[data-seat="' + seat + '"]'); }
   function boxEl(seat) { var h = holderEl(seat); return h && h.querySelector('.hold-box'); }
-  function pipsHtml(v) { return '<span class="pips p' + v + '"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>'; }
+
+  var CUBE_FACES = [1, 2, 3, 4, 5, 6].map(function (n) { return '<span class="face f' + n + '"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>'; }).join('');
+  function cubeEl(seat) { var b = boxEl(seat); return b && b.querySelector('.hb-cubei'); }
 
   function buildHolders(s) {
     [0, 1, 2, 3].forEach(function (seat) {
@@ -342,7 +344,7 @@
       if (!on) { h.innerHTML = ''; return; }
       var stats = '<span class="hold-stats"><span class="hs" title="Captures">⚔ <b class="k">0</b></span><span class="hs" title="Pawns lost">💀 <b class="l">0</b></span></span>';
       var box = '<span class="hold-ring"><button class="hold-box" data-seat="' + seat + '" aria-label="' + esc(s.players[seat].name) + ' dice">' +
-        '<span class="hb-face">' + avatarFor(seat, s) + '</span><span class="hb-pips"></span>' +
+        '<span class="hb-face">' + avatarFor(seat, s) + '</span><span class="hb-cube"><span class="hb-cubei">' + CUBE_FACES + '</span></span>' +
         '<span class="hb-timer" hidden><b>10</b></span></button></span><span class="hold-hand">👆</span>';
       h.innerHTML = left ? stats + box : box + stats;
     });
@@ -352,12 +354,10 @@
     s.seats.forEach(function (seat) {
       var b = boxEl(seat);
       if (!b) return;
-      b.classList.remove('ready', 'cur');
+      b.classList.remove('ready', 'cur', 'cubed', 'dragging');
       holderEl(seat).classList.remove('cur', 'ready');
-      if (seat === s.current) {            // a new turn starts: show the avatar again
-        b.classList.remove('rolled');
-        b.querySelector('.hb-pips').innerHTML = '';
-      }
+      var ci = cubeEl(seat);
+      if (ci) { ci.classList.remove('manual', 'back'); ci.style.transform = ''; }
     });
   }
 
@@ -410,7 +410,7 @@
     var h = holderEl(seat);
     if (h) h.classList.add('cur');
     var b = boxEl(seat);
-    if (b) b.classList.add('cur');
+    if (b) b.classList.add('cur', 'cubed');
     updateStrip(s);
   }
   function onStateChanged(s) { updateStrip(s); }
@@ -420,6 +420,8 @@
       var h = holderEl(s.current), b = boxEl(s.current);
       if (b) b.classList.toggle('ready', !!on);
       if (h) h.classList.toggle('ready', !!on);
+      var ci = cubeEl(s.current);
+      if (on && ci && !drag) { ci.classList.remove('manual', 'back'); ci.style.transform = ''; if (b) b.classList.add('cubed'); }
     }
     if (!on && pickKind) pickKind = null;
     if (ctrl && ctrl.state) updateSpells(ctrl.state);
@@ -521,45 +523,105 @@
     return { x: r.left - g.left + r.width / 2, y: r.top - g.top + r.height / 2, w: r.width, h: r.height };
   }
 
+  // The player's swipe (drag away from the holder) decides the direction of the first bounce.
+  var throwDir = null;
+
   function animateDice(seat, value) {
     return new Promise(function (resolve) {
       var spot = $('dice-spot'), game = $('screen-game'), box = boxEl(seat);
+      var dir = throwDir; throwDir = null;
       if (!box) { setDiceFace(value, 2); setTimeout(resolve, 600); return; }
       var from = relRect(box, game), to = relRect($('board'), game);
-      var size = Math.round(Math.min(from.w, from.h) * 0.8), big = Math.min(to.w * 0.2, 96) / size;
+      var size = Math.round(Math.min(from.w, from.h) - 6);                  // exactly as big as the holder's cube
+      var big = Math.min(to.w * 0.2, 96) / size;
       var sx = from.x - size / 2, sy = from.y - size / 2, ex = to.x - size / 2, ey = to.y - size / 2;
+      var dx = ex - sx, dy = ey - sy, dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      var d = dir || { x: dx / dist, y: dy / dist };
+      var hop = Math.min(dist * 0.45, 70 + (dir ? dir.power * 60 : 0));
+      var p1 = { x: sx + d.x * hop, y: sy + d.y * hop };
+      var p2 = { x: (p1.x + ex) / 2 - d.y * 14, y: (p1.y + ey) / 2 + d.x * 14 };
+      var p3 = { x: ex + d.x * 10, y: ey + d.y * 10 };
+      function T(pt, k) { return 'translate(' + pt.x.toFixed(1) + 'px,' + pt.y.toFixed(1) + 'px) scale(' + k.toFixed(2) + ')'; }
+      function mid(a, b) { return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }; }
       diceFlying = true;
       spot.hidden = false;
       spot.className = 'dice-fly';
       spot.style.width = spot.style.height = size + 'px';
       spot.style.setProperty('--half', (size / 2) + 'px');
-      spot.style.setProperty('--dc', COLOR_HEX[seat]);
       spot.style.transition = 'none';
-      spot.style.transform = 'translate(' + sx + 'px,' + sy + 'px) scale(1)';
+      spot.style.transform = T({ x: sx, y: sy }, 1);
       box.classList.add('away');
       box.classList.remove('ready');
       void spot.offsetWidth;
-      spot.style.transition = 'transform .42s cubic-bezier(.2,.8,.25,1.15)';
-      spot.style.transform = 'translate(' + ex + 'px,' + ey + 'px) scale(' + big.toFixed(2) + ')';
-      setDiceFace(value, 3);                                   // tumbles on the way and over the board
+      setDiceFace(value, 3);                                   // keeps rotating the whole way, through every bounce
+      var kf = [
+        { transform: T({ x: sx, y: sy }, 1), offset: 0 },
+        { transform: T(mid({ x: sx, y: sy }, p1), 1.7), offset: .12 },      // jump (seen from above: it gets bigger)
+        { transform: T(p1, 1.25), offset: .26 },                            // 1st bounce
+        { transform: T(mid(p1, p2), 1.5 * big / 1.4), offset: .42 },
+        { transform: T(p2, big * .85), offset: .54 },                       // 2nd bounce
+        { transform: T(mid(p2, p3), big * 1.15), offset: .68 },
+        { transform: T(p3, big * .95), offset: .78 },                       // 3rd small bounce
+        { transform: T({ x: ex, y: ey }, big), offset: .9 },
+        { transform: T({ x: ex, y: ey }, big), offset: 1 }
+      ];
+      var endT = T({ x: ex, y: ey }, big);
+      var anim = spot.animate ? spot.animate(kf, { duration: 1100, easing: 'ease-in-out', fill: 'forwards' }) : null;
+      if (!anim) spot.style.transform = endT;
       setTimeout(function () {
+        spot.style.transform = endT;
+        if (anim) anim.cancel();
         spot.classList.add('landed');
         if (value === 6) spot.classList.add('six');
-      }, 900);
-      setTimeout(function () { resolve(); }, 1180);
-      setTimeout(function () {                                  // fly back and show the number in the holder
+      }, 1110);
+      setTimeout(function () { resolve(); }, 1300);
+      setTimeout(function () {                                  // fly back into the holder
         spot.style.transition = 'transform .34s cubic-bezier(.5,0,.7,.4)';
-        spot.style.transform = 'translate(' + sx + 'px,' + sy + 'px) scale(1)';
-      }, 1200);
+        spot.style.transform = T({ x: sx, y: sy }, 1);
+      }, 1320);
       setTimeout(function () {
         spot.hidden = true;
         spot.className = 'dice-fly';
         box.classList.remove('away');
-        box.classList.add('rolled');
-        box.querySelector('.hb-pips').innerHTML = pipsHtml(value);
+        box.classList.add('rolled', 'cubed');
+        var ci = cubeEl(seat), f = DICE_FACE[value] || DICE_FACE[1];       // the holder cube now shows the number
+        if (ci) { ci.classList.add('manual', 'back'); ci.style.transform = 'rotateX(' + f[0] + 'deg) rotateY(' + f[1] + 'deg)'; }
         diceFlying = false;
-      }, 1560);
+      }, 1680);
     });
+  }
+
+  // ---- drag the holder's dice: it turns under the finger; a swipe throws it that way
+  var drag = null, lastPointer = 0;
+  function bindHolderDice() {
+    var scr = $('screen-game');
+    scr.addEventListener('pointerdown', function (e) {
+      var hb = e.target.closest('.hold-box');
+      if (!hb || !ctrl || Number(hb.getAttribute('data-seat')) !== ctrl.state.current) return;
+      if (!hb.parentNode.parentNode.classList.contains('ready')) return;
+      var ci = hb.querySelector('.hb-cubei');
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, rx: -24, ry: 32, hb: hb, ci: ci, moved: false };
+      try { hb.setPointerCapture(e.pointerId); } catch (x) { /* ignore */ }
+    });
+    scr.addEventListener('pointermove', function (e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moved && Math.sqrt(dx * dx + dy * dy) < 8) return;
+      if (!drag.moved) { drag.moved = true; drag.hb.classList.add('dragging'); if (drag.ci) drag.ci.classList.add('manual'); }
+      if (drag.ci) drag.ci.style.transform = 'rotateX(' + (drag.rx - dy * 1.3).toFixed(1) + 'deg) rotateY(' + (drag.ry + dx * 1.3).toFixed(1) + 'deg)';
+    });
+    function end(e) {
+      if (!drag || e.pointerId !== drag.id) return;
+      var d = drag, dx = e.clientX - d.x, dy = e.clientY - d.y, len = Math.sqrt(dx * dx + dy * dy);
+      drag = null; lastPointer = Date.now();
+      d.hb.classList.remove('dragging');
+      if (e.type === 'pointercancel') { if (d.ci) d.ci.classList.remove('manual'); return; }
+      if (d.moved && len > 24) throwDir = { x: dx / len, y: dy / len, power: Math.min(len / 120, 1) };
+      else if (d.ci) d.ci.classList.remove('manual');
+      if (ctrl && Number(d.hb.getAttribute('data-seat')) === ctrl.state.current) ctrl.requestRoll();
+    }
+    scr.addEventListener('pointerup', end);
+    scr.addEventListener('pointercancel', end);
   }
 
   function confirmHandOff(info) {
@@ -897,11 +959,12 @@
         if (ok) { ctrl.destroy(); D.clearSavedGame(); A.stopMusic(); goRoot('home'); } else { ctrl.unpause(); }
       });
     };
+    bindHolderDice();
     document.addEventListener('click', function (e) {
       var kind = e.target.closest('[data-kind]');
       if (kind) { openKind(kind.getAttribute('data-kind')); return; }
       var hb = e.target.closest('#screen-game .hold-box');
-      if (hb && ctrl && Number(hb.getAttribute('data-seat')) === ctrl.state.current) ctrl.requestRoll();
+      if (hb && Date.now() - lastPointer > 600 && ctrl && Number(hb.getAttribute('data-seat')) === ctrl.state.current) ctrl.requestRoll();   // keyboard / accessibility
     });
     $('variant-list').addEventListener('click', function (e) {
       var info = e.target.closest('[data-info]');
